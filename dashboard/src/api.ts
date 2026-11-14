@@ -78,7 +78,7 @@ async function staticGet(path: string): Promise<any> {
   if (p.startsWith("traces/")) return loadStatic(`traces/${p.slice(7)}.json`);
   if (p === "metrics") {
     const r = q.get("range") || "7d";
-    return loadStatic(`metrics-${["24h", "7d", "30d"].includes(r) ? r : "30d"}.json`);
+    return loadStatic(`metrics-${["1h", "24h", "7d", "30d"].includes(r) ? r : "30d"}.json`);
   }
   if (p === "scores") {
     const all = await loadStatic("scores.json");

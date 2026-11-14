@@ -7,7 +7,7 @@ type Ctx = { range: string; setRange: (r: string) => void; project: Project | nu
 const AppCtx = createContext<Ctx>(null as any);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [range, setRangeState] = useState(localStorage.getItem("tl.range") || (import.meta.env.VITE_STATIC_DEMO === "1" ? "1h" : "24h"));
+  const [range, setRangeState] = useState(localStorage.getItem("tl.range") || "24h");
   const [project, setProject] = useState<Project | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
