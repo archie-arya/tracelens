@@ -1,0 +1,1 @@
+{"data":[{"session_id":"sess_2918","traces":3,"start_time":1794657773.615931,"end_time":1794657781.367629,"total_cost":0.0001009,"total_tokens":697,"user_id":"o.mensah","errors":0},{"session_id":"s1","traces":3,"start_time":1794657369.815651,"end_time":1794657400.638572,"total_cost":0.0,"total_tokens":0,"user_id":null,"errors":0}],"total":2}
