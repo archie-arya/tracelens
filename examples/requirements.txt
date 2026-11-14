@@ -1,0 +1,6 @@
+google-genai
+openai
+langchain-core
+langchain-openai
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
