@@ -247,6 +247,20 @@ All settings are environment variables. The defaults are tuned for a single deve
 
 Running locally is the default. If your team wants one shared server, run the same Docker image (or `docker compose`) on any machine or VM you control, set `HOST=0.0.0.0`, Postgres and a real `TRACELENS_INIT_API_KEY`, and point every app's `TRACELENS_HOST` at it. [`deploy/`](deploy) has `fly.toml` and `render.yaml` starting points for managed hosts. Put it behind HTTPS before sending production data.
 
+## ❓ FAQ
+
+**What is "the TraceLens server"?**
+A program you run yourself: on your laptop, or on a machine your team controls. It receives traces from your app, stores them in SQLite (or Postgres), serves the dashboard, and runs the LLM judges and the Cost Optimizer. There is no central TraceLens cloud and no account. Each developer or team runs their own server.
+
+**TraceLens key vs. my OpenAI or Gemini key: which is which?**
+They are separate. Your **LLM provider key** (OpenAI, Gemini, Groq...) stays in your app, as it is today. TraceLens never needs it to record traces. The **TraceLens project key** (`tl-sk-...`) only tells your server which project a trace belongs to. The server needs a model key only for LLM judges and the Cost Optimizer, and only on the server: for example a free `GEMINI_API_KEY`. With Ollama you need no key at all.
+
+**How do I get a TraceLens key?**
+Start your server. With `./scripts/run_local.sh` (or the manual command above), the key `tl-sk-local-dev` works from the first start. With docker compose it is `tl-sk-local-dev-change-me`. If you start `tracelens-server` without `TRACELENS_INIT_API_KEY`, a random key is printed in the log. To create more projects and keys, use **Settings** in your own server's dashboard.
+
+**Can I get a key from the public demo?**
+No. [The demo](https://archie-arya.github.io/tracelens/) is a static, read-only snapshot hosted on GitHub Pages. There is no server behind it, so it can't receive traces or issue keys. Run your own server (two minutes, above) to trace your app.
+
 ## 🛠 Development
 
 ```bash

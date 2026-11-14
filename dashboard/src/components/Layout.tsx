@@ -77,10 +77,14 @@ export function Layout({ children }: { children: ReactNode }) {
                 </button>
               ))}
             </div>
-            {readOnly && (
-              <Link to="/settings" className="btn btn-primary">
-                <KeyRound className="h-3.5 w-3.5" /> Get API key
-              </Link>
+            {staticMode ? (
+              <RunYourOwn />
+            ) : (
+              readOnly && (
+                <Link to="/settings" className="btn btn-primary">
+                  <KeyRound className="h-3.5 w-3.5" /> Get API key
+                </Link>
+              )
             )}
           </div>
         </header>
@@ -97,6 +101,40 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </main>
       </div>
+    </div>
+  );
+}
+
+const QUICKSTART = "https://github.com/archie-arya/tracelens#-run-it-locally-2-minutes";
+
+// Static demo only: there is no server behind this page, so explain keys instead of offering one.
+function RunYourOwn() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        className="btn btn-primary"
+        onClick={() => setOpen((o) => !o)}
+        title="TraceLens project keys (tl-sk-...) come from a TraceLens server you run yourself"
+        aria-expanded={open}
+      >
+        <KeyRound className="h-3.5 w-3.5" /> Run your own
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-zinc-700 bg-zinc-900 p-4 text-sm text-zinc-300 shadow-xl">
+          <div className="mb-1.5 font-semibold text-white">This demo has no server behind it</div>
+          <p className="mb-2 text-zinc-400">
+            It's a read-only snapshot. To trace your own app, run the TraceLens server on your machine (one command), then use its project key{" "}
+            <code className="text-indigo-300">tl-sk-local-dev</code> in your app.
+          </p>
+          <p className="mb-3 text-xs text-zinc-500">
+            A TraceLens key is not an OpenAI or Gemini key. Your LLM keys stay in your app, and TraceLens doesn't need them to record traces.
+          </p>
+          <a className="btn btn-primary w-full justify-center" href={QUICKSTART} target="_blank" rel="noreferrer">
+            Local quickstart (2 minutes)
+          </a>
+        </div>
+      )}
     </div>
   );
 }
