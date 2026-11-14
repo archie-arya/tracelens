@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build the static read-only demo dashboard from demo/snapshot and push it to the gh-pages branch.
+# Manual fallback: build the static demo from demo/snapshot and push it to a gh-pages branch.
+# Normally .github/workflows/pages.yml publishes the demo on every push that touches dashboard/ or demo/.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BASE="${PAGES_BASE:-/tracelens/}"

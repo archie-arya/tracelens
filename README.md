@@ -10,9 +10,9 @@ Your traces stay on your machine · 2-line SDK · OpenTelemetry native · SQLite
 
 [**Run it locally →**](#-run-it-locally-2-minutes) · [See it in action (read-only demo)](https://archie-arya.github.io/tracelens/) · [Integrations](#-integrations) · [Extend it](docs/extending.md) · [API](docs/api.md)
 
+[![CI](https://github.com/archie-arya/tracelens/actions/workflows/ci.yml/badge.svg)](https://github.com/archie-arya/tracelens/actions/workflows/ci.yml)
 ![License: MIT](https://img.shields.io/badge/license-MIT-indigo)
 ![Python SDK: zero deps](https://img.shields.io/badge/python%20sdk-zero%20deps-22d3ee)
-![Tests: pytest + node:test](https://img.shields.io/badge/tests-pytest%20%2B%20node%3Atest-green)
 
 </div>
 
