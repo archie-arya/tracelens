@@ -54,6 +54,22 @@ def build_eval_input(trace: Dict[str, Any], expected: Any = None, observation_na
     if md.get("context"):
         c = md["context"]
         context.extend(_doc_text(d) for d in (c if isinstance(c, list) else [c]))
+    if not context:
+        # Fall back to grounding passed in system prompts (common "stuff the context in the prompt" pattern).
+        for o in obs:
+            if o.get("type") != "generation":
+                continue
+            msgs = o.get("input")
+            if isinstance(msgs, dict):
+                msgs = msgs.get("messages") or msgs.get("contents")
+            if isinstance(msgs, list):
+                for m in msgs:
+                    if isinstance(m, dict) and m.get("role") in ("system", "developer"):
+                        c = m.get("content")
+                        if isinstance(c, list):
+                            c = " ".join(_doc_text(x) for x in c)
+                        if c and str(c) not in context:
+                            context.append("[system prompt] " + str(c))
     if expected is None:
         expected = md.get("expected_output")
     return EvalInput(input=inp, output=out, expected_output=expected, context=context, metadata=md, trace=trace)

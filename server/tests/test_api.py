@@ -222,3 +222,11 @@ def test_langfuse_style_alias(client):
     assert client.post("/api/public/ingestion", json={"batch": batch}, headers=KEY).status_code == 200
     t = client.get(f"/api/v1/traces/{tid}", headers=KEY).json()
     assert t["user_id"] == "x" and t["total_tokens"] == 10
+
+
+def test_eval_input_uses_system_prompt_as_context():
+    from tracelens_server.evals.runner import build_eval_input
+    trace = {"input": "q", "output": "a", "observations": [
+        {"type": "generation", "input": [{"role": "system", "content": "Refunds within 30 days."}, {"role": "user", "content": "q"}]}]}
+    ei = build_eval_input(trace)
+    assert ei.context == ["[system prompt] Refunds within 30 days."]
