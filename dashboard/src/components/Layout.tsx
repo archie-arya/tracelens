@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import { Bell, Database, FlaskConical, KeyRound, LayoutDashboard, ListTree, MessagesSquare, Settings } from "lucide-react";
+import { Bell, CircleDollarSign, Database, FlaskConical, KeyRound, LayoutDashboard, ListTree, MessagesSquare, Settings } from "lucide-react";
 import { ReactNode, useState } from "react";
 import { setKey } from "../api";
 import { Link, NavLink, useLocation } from "react-router-dom";
@@ -11,6 +11,7 @@ const NAV = [
   { to: "/sessions", label: "Sessions", icon: MessagesSquare },
   { to: "/evals", label: "Evaluations", icon: FlaskConical },
   { to: "/datasets", label: "Datasets", icon: Database },
+  { to: "/optimizer", label: "Cost Optimizer", icon: CircleDollarSign },
   { to: "/alerts", label: "Alerts", icon: Bell },
   { to: "/settings", label: "Settings & Keys", icon: Settings },
 ];

@@ -86,11 +86,14 @@ async function staticGet(path: string): Promise<any> {
     const rows = name ? all.data.filter((s: any) => s.name === name) : all.data;
     return { data: rows.slice(0, Number(q.get("limit") || 100)), total: rows.length };
   }
+  const om = p.match(/^optimizer\/runs\/([^/]+)$/);
+  if (om) return loadStatic(`optimizer/${om[1]}.json`);
   const m = p.match(/^datasets\/([^/]+)(\/runs)?$/);
   if (m) return loadStatic(`datasets/${m[1]}${m[2] ? "-runs" : ""}.json`);
   const simple: Record<string, string> = {
     project: "project.json", sessions: "sessions.json", filters: "filters.json", evaluators: "evaluators.json", "eval-rules": "eval-rules.json",
-    datasets: "datasets.json", "alerts/rules": "alert-rules.json", "alerts/events": "alert-events.json", "../health": "health.json",
+    datasets: "datasets.json", "optimizer/runs": "optimizer-runs.json", "optimizer/steps": "optimizer-steps.json",
+    "optimizer/plugins": "optimizer-plugins.json", "alerts/rules": "alert-rules.json", "alerts/events": "alert-events.json", "../health": "health.json",
   };
   if (simple[p]) return loadStatic(simple[p]);
   if (u.pathname === "/api/health") return loadStatic("health.json");

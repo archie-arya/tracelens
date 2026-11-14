@@ -7,6 +7,7 @@ import "./index.css";
 import Alerts from "./pages/Alerts";
 import Datasets, { DatasetDetail } from "./pages/Datasets";
 import Evals from "./pages/Evals";
+import Optimizer, { OptimizerRun } from "./pages/Optimizer";
 import Overview from "./pages/Overview";
 import Sessions from "./pages/Sessions";
 import SettingsPage from "./pages/Settings";
@@ -29,6 +30,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="/evals" element={<Evals />} />
             <Route path="/datasets" element={<Datasets />} />
             <Route path="/datasets/:id" element={<DatasetDetail />} />
+            <Route path="/optimizer" element={<Optimizer />} />
+            <Route path="/optimizer/:id" element={<OptimizerRun />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>

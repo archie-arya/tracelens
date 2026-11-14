@@ -1,7 +1,8 @@
 export function fmtCost(v?: number | null): string {
   if (v === null || v === undefined) return "–";
   if (v === 0) return "$0";
-  if (v < 0.0001) return `$${v.toExponential(1)}`;
+  if (v < 0.000001) return "<$0.000001";
+  if (v < 0.0001) return `$${v.toFixed(6)}`;
   if (v < 0.01) return `$${v.toFixed(5)}`;
   if (v < 1) return `$${v.toFixed(4)}`;
   return `$${v.toFixed(2)}`;
