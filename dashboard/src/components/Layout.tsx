@@ -1,7 +1,8 @@
 import { clsx } from "clsx";
 import { Bell, Database, FlaskConical, KeyRound, LayoutDashboard, ListTree, MessagesSquare, Settings } from "lucide-react";
-import { ReactNode } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { ReactNode, useState } from "react";
+import { setKey } from "../api";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { useApp } from "../state";
 
 const NAV = [
@@ -34,7 +35,8 @@ export function Logo() {
 }
 
 export function Layout({ children }: { children: ReactNode }) {
-  const { project, readOnly, staticMode, range, setRange } = useApp();
+  const { project, projectError, readOnly, staticMode, range, setRange } = useApp();
+  const loc = useLocation();
   return (
     <div className="flex h-full">
       <aside className="hidden w-56 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950 md:flex">
@@ -89,9 +91,29 @@ export function Layout({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <main className="min-h-0 flex-1 overflow-auto px-5 py-5">
-          <div className="mx-auto max-w-[1400px]">{children}</div>
+          <div className="mx-auto max-w-[1400px]">
+            {!project && projectError && !staticMode && !loc.pathname.startsWith("/settings") ? <ConnectKey error={projectError} /> : children}
+          </div>
         </main>
       </div>
+    </div>
+  );
+}
+
+function ConnectKey({ error }: { error: string }) {
+  const [k, setK] = useState("");
+  return (
+    <div className="mx-auto mt-16 max-w-lg card p-6">
+      <div className="mb-1 flex items-center gap-2 text-lg font-semibold text-white"><KeyRound size={18} /> Connect to your TraceLens server</div>
+      <p className="mb-4 text-sm text-zinc-400">
+        Paste a project API key to open its dashboard. Running locally? It is the <code className="text-indigo-300">TRACELENS_INIT_API_KEY</code> you started the server with
+        (<code className="text-indigo-300">tl-sk-local-dev</code> by default), or the key printed in the server log.
+      </p>
+      <form className="flex gap-2" onSubmit={(e) => (e.preventDefault(), k.trim() && setKey(k.trim()))}>
+        <input className="input flex-1 font-mono" placeholder="tl-sk-..." value={k} onChange={(e) => setK(e.target.value)} autoFocus />
+        <button className="btn btn-primary" type="submit">Connect</button>
+      </form>
+      <p className="mt-3 text-xs text-zinc-500">Server said: {error}. Keys are stored only in this browser. Manage servers, projects and keys under <Link to="/settings" className="text-indigo-300">Settings</Link>.</p>
     </div>
   );
 }
