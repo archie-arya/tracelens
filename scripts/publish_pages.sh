@@ -10,6 +10,6 @@ OUT="$(mktemp -d)"
 VITE_STATIC_DEMO=1 VITE_BASE="$BASE" VITE_OUT_DIR="$OUT" npx vite build
 rm -rf public/demo-data
 cp "$OUT/index.html" "$OUT/404.html"; touch "$OUT/.nojekyll"
-cd "$OUT" && git init -q -b gh-pages && git add -A && git commit -qm "Publish demo dashboard" \
+cd "$OUT" && git init -q -b gh-pages && git add -A && git -c user.name="$(git -C "$ROOT" config user.name || echo TraceLens)" -c user.email="$(git -C "$ROOT" config user.email || echo tracelens@users.noreply.github.com)" commit -qm "Publish demo dashboard" \
   && git push -f "$(git -C "$ROOT" remote get-url origin)" gh-pages
 echo "published from $OUT"
