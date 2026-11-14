@@ -21,4 +21,4 @@ await tl.flush();
 
 Nesting uses `AsyncLocalStorage` on Node, Bun and Deno. Export is batched, retried and behind a circuit breaker, so it never throws into your app.
 
-Install from the repo: `npm i "https://gitpkg.vercel.app/archie-arya/tracelens/sdk/js?main"`, or vendor `src/index.ts`.
+Install from the GitHub release: `npm i https://github.com/archie-arya/tracelens/releases/download/v0.1.0/tracelens-js-0.1.0.tgz`, or vendor the single file `src/index.ts`.

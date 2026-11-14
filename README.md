@@ -130,7 +130,7 @@ Every new trace now gets a faithfulness score with the judge's reasoning, using 
 | LangChain / LangGraph | `config={"callbacks": [TraceLensCallbackHandler()]}` |
 | Any framework / custom code | `@tracelens.observe()`, `with tracelens.span(...)`, `with tracelens.generation(...)` |
 | OpenTelemetry (any language, OpenLLMetry, OpenInference) | OTLP/HTTP → `{host}/v1/traces`, header `Authorization: Bearer <key>` |
-| JavaScript / TypeScript | [`sdk/js`](sdk/js): `tl.trace()`, `tl.span()`, `wrapOpenAI()` |
+| JavaScript / TypeScript | [`sdk/js`](sdk/js): `tl.trace()`, `tl.span()`, `wrapOpenAI()`. Install: `npm i https://github.com/archie-arya/tracelens/releases/download/v0.1.0/tracelens-js-0.1.0.tgz` |
 | Langfuse SDKs | point them at TraceLens: `/api/public/ingestion` is accepted |
 | Plain HTTP | `POST /api/v1/ingest`. See [docs/api.md](docs/api.md) |
 
