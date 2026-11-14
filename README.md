@@ -18,7 +18,7 @@ Your traces stay on your machine · 2-line SDK · OpenTelemetry native · SQLite
 
 ---
 
-TraceLens is a lightweight, self-hosted alternative to LangSmith and Langfuse. There is no account and no cloud: you run one small server next to your app, and every OpenAI, Groq, Gemini, Anthropic, LiteLLM or LangChain call shows up as a **nested trace**, with inputs and outputs, token usage, cost, latency, time-to-first-token and errors. **Evaluators** then score each answer for relevance, faithfulness (hallucination), toxicity or your own rubric, and a **webhook alert** fires when quality drops or costs spike.
+TraceLens is a lightweight, self-hosted alternative to LangSmith and Langfuse. There is no account and no cloud: you run one small server next to your app, and every OpenAI, Groq, Gemini, Anthropic, LiteLLM or LangChain call shows up as a **nested trace**, with inputs and outputs, token usage, cost, latency, time-to-first-token and errors. **Evaluators** then score each answer for relevance, faithfulness (hallucination), toxicity or your own rubric, and a **webhook alert** fires when quality drops or costs spike. The **Cost Optimizer** replays your real prompts on cheaper models and tells you which steps can switch, and what that does to cost, quality and latency.
 
 Everything is stored in a SQLite file on your disk (`./data/tracelens.db`). Nothing is sent anywhere else, except the judge prompts if you turn on LLM evals with a cloud model. Use Ollama to keep even those local.
 
@@ -98,6 +98,7 @@ Every new trace now gets a faithfulness score with the judge's reasoning.
 | **Metrics** | Volume, cost, tokens, p50/p95/p99 latency, error rate and TTFT over time, broken down by model, workflow, user and tag. |
 | **Evaluations** | LLM-as-judge (relevance, faithfulness/hallucination, toxicity, correctness, custom rubric) and heuristics (JSON validity, regex, length, keywords, exact match, similarity, latency budget). You can run them **online** with sampling rules, in batches, from a playground or on a single trace. Write your own with one small class. |
 | **Datasets & experiments** | Golden datasets plus `run_experiment()` to compare prompt or model versions side by side with scores, latency and cost. |
+| **Cost Optimizer** | Replays sampled production prompts, per step, on cheaper candidate models (Gemini, Groq, Ollama, any OpenAI-compatible API, LiteLLM), scores them against the original outputs, and recommends switches with cost, quality and latency deltas, a confidence level and side-by-side examples. Tool calls are never replayed. Spend is capped and replays are cached. |
 | **Alerts** | Rules on cost, error rate, latency, volume or average score over a sliding window. Alerts go to a Slack- or Discord-compatible webhook, with cooldowns. |
 | **Feedback** | `tracelens.score("user_feedback", True)` from your app, or via the REST API. |
 | **Production-safe SDK** | Zero dependencies. Export is async, batched and non-blocking, with retry and backoff, a bounded queue and a circuit breaker. Includes sampling, a PII redaction hook and a **no-op mode** when no key is set or the server is down. |
@@ -189,6 +190,26 @@ create_dataset("support-golden", [{"input": "Refund window?", "expected_output":
 run_experiment("support-golden", my_app, run_name="v2-rag", evaluators=["similarity", "llm_correctness"])
 ```
 
+## 💸 Cost Optimizer
+
+"Could this step run on a cheaper model?" Answered with your own traffic instead of a benchmark:
+
+```bash
+pip install -e sdk/python            # gives you the `tracelens` CLI
+export TRACELENS_API_KEY=tl-sk-...   # TRACELENS_HOST defaults to http://localhost:8000
+tracelens steps                      # LLM steps by spend, and how many calls can be replayed
+tracelens optimize --step "support-rag / gemini.generate_content" \
+                   --candidates gemini:gemma-4-26b-a4b-it,gemini:gemini-3.1-flash-lite --sample-size 20 --max-spend 0.50
+```
+
+```
+→ SWITCH: gemini:gemma-4-26b-a4b-it is 100% cheaper with -2.0% relative quality and +1786% latency over 10 replays (threshold -5%).  [confidence: medium, n=10]
+```
+
+The same is available from the dashboard (*Cost Optimizer*: pick a step, add candidates, run), from Python (`tracelens.optimize(steps=[...], candidates=[...])`), and from `POST /api/v1/optimizer/runs`. Free candidates work out of the box: the Gemini free tier with `GEMINI_API_KEY`, or local Ollama models, which always cost $0. Providers, scorers, samplers and policies are all plugins.
+
+Results are **estimates**: list prices, and quality relative to the original output, on a sample. Only `generation` calls without tools are replayed, and inputs can be redacted first (`--redact`). Read **[docs/cost-optimizer.md](docs/cost-optimizer.md)** for the design and caveats.
+
 ## 🧩 Extensibility
 
 Everything is a plugin point. See **[docs/extending.md](docs/extending.md)** for details.
@@ -199,6 +220,9 @@ Everything is a plugin point. See **[docs/extending.md](docs/extending.md)** for
 * **Integrations**: `tracelens.register_integration("mylib", "my_pkg.tracelens_mylib")`, a module exposing `instrument()`.
 * **Pricing**: `tracelens.pricing.register(...)` / `set_calculator(fn)` in the SDK, or `TRACELENS_PRICING_FILE` on the server.
 * **Judge models**: any provider/model chain through environment variables.
+* **Cost Optimizer**: `@register_provider`, `@register_scorer`, `@register_sampler` and `@register_policy`, loaded the same way (`TRACELENS_PLUGINS` or a `tracelens.plugins` entry point). Every evaluator is also usable as an optimizer scorer (`eval:<name>`).
+
+All docs: **[docs/](docs/README.md)**.
 
 ## ⚙️ Configuration
 
@@ -209,18 +233,19 @@ All settings are environment variables. The defaults are tuned for a single deve
 | `TRACELENS_DATABASE_URL` | `sqlite:///./data/tracelens.db` | or `postgresql://user:pass@host/db` (`--data-dir` sets the SQLite folder) |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | set `HOST=0.0.0.0` to accept traffic from other machines |
 | `TRACELENS_INIT_API_KEY` | random, printed in logs | fixed key for the `default` project |
-| `GEMINI_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` + `OPENAI_BASE_URL` / `OLLAMA_BASE_URL` | – | judge providers |
+| `GEMINI_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` + `OPENAI_BASE_URL` / `OLLAMA_BASE_URL` | – | judge providers and Cost Optimizer candidates (also `OPENROUTER_`, `TOGETHER_`, `DEEPSEEK_`, `FIREWORKS_`, `MISTRAL_API_KEY`) |
 | `TRACELENS_JUDGE_MODELS` | Gemini flash-lite chain | `provider:model,...` fallback order |
 | `TRACELENS_ALLOW_SIGNUP` | `true` | anyone can create a project from the dashboard |
 | `TRACELENS_PUBLIC_DEMO` / `TRACELENS_DEMO_PROJECT` | `false` / `demo` | anonymous read-only access to one project |
 | `TRACELENS_ADMIN_TOKEN` | – | enables `GET /api/v1/projects` |
 | `TRACELENS_PLUGINS`, `TRACELENS_STORAGE`, `TRACELENS_PRICING_FILE` | – | extensions |
 | `TRACELENS_LLM_EVALS_PER_HOUR` | `300` | per-project judge rate limit |
+| `TRACELENS_OPTIMIZER_REDACT` / `TRACELENS_OPTIMIZER_RPM_<PROVIDER>` | `false` / per provider | always redact replayed prompts, and per-provider request rate (e.g. `TRACELENS_OPTIMIZER_RPM_GEMINI=12`) |
 
 
 ### Optional: a shared team instance
 
-Running locally is the default. If your team wants one shared server, run the same Docker image (or `docker compose`) on any machine or VM you control, set `HOST=0.0.0.0`, Postgres and a real `TRACELENS_INIT_API_KEY`, and point every app's `TRACELENS_HOST` at it. `fly.toml` and `render.yaml` are included as starting points for managed hosts. Put it behind HTTPS before sending production data.
+Running locally is the default. If your team wants one shared server, run the same Docker image (or `docker compose`) on any machine or VM you control, set `HOST=0.0.0.0`, Postgres and a real `TRACELENS_INIT_API_KEY`, and point every app's `TRACELENS_HOST` at it. [`deploy/`](deploy) has `fly.toml` and `render.yaml` starting points for managed hosts. Put it behind HTTPS before sending production data.
 
 ## 🛠 Development
 

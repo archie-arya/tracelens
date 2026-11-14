@@ -94,3 +94,105 @@ Masking runs in the SDK before data leaves your process.
 ## 8. Alerts
 
 Webhooks get a JSON payload containing `text` and `content`, which Slack and Discord render directly, plus structured `rule`, `value` and `project_id` fields. To route alerts elsewhere, point the webhook at your own service: PagerDuty, email or an incident bot.
+
+## 9. Cost Optimizer plugins
+
+The [Cost Optimizer](cost-optimizer.md) is built from four registries. A plugin is a small class with a `name`, a `description` and optional `config_fields`, registered with a decorator. Load your module with `TRACELENS_PLUGINS=my_pkg.optimizer_plugins` (comma-separated), or ship it as a package with an entry point:
+
+```toml
+[project.entry-points."tracelens.plugins"]
+my_plugins = "my_pkg.optimizer_plugins"     # imported at server start; the decorators do the registering
+```
+
+Each plugin then appears in `GET /api/v1/optimizer/plugins`, in the dashboard's run form, and in the CLI and SDK by name.
+
+### Provider: where candidate models run
+
+```python
+from tracelens_server.optimizer import Provider, Completion, register_provider
+from tracelens_server.optimizer.providers import OpenAICompatible
+
+@register_provider                      # any OpenAI-compatible API: two attributes
+class Cerebras(OpenAICompatible):
+    name = "cerebras"
+    description = "Cerebras (CEREBRAS_API_KEY)"
+    base_url = "https://api.cerebras.ai/v1"
+    key_env = "CEREBRAS_API_KEY"
+    default_rpm = 30
+
+@register_provider                      # anything else: implement complete()
+class MyGateway(Provider):
+    name = "gateway"
+    local = False                       # True = always $0 (e.g. on-prem models)
+    default_rpm = 120                   # override per run with "rpm" or TRACELENS_OPTIMIZER_RPM_GATEWAY
+
+    def available(self) -> bool:
+        return True
+
+    async def complete(self, model, messages, params) -> Completion:
+        # messages: OpenAI-style [{"role", "content"}]; params: temperature, top_p, max_tokens, stop, seed, json
+        text, usage = await my_client.chat(model, messages, **params)
+        return Completion(text=text, input_tokens=usage.inp, output_tokens=usage.out)   # cost=None -> pricing table
+```
+
+Use it as `gateway:my-model`. Rate limiting, retries on 429 and 5xx, timeouts, caching and the spend cap are handled for you. Raise an `httpx.HTTPStatusError` (or any exception) on failure.
+
+### Scorer: how a candidate output is compared with the original
+
+```python
+from tracelens_server.optimizer import Scorer, Comparison, register_scorer
+
+@register_scorer
+class SameLanguage(Scorer):
+    name = "same_language"
+    description = "1 if the candidate answers in the same language as the original"
+    kind = "heuristic"                  # or "llm"
+
+    def applicable(self, sample) -> bool:   # optional; "auto" falls back when False
+        return bool(sample.output_text)
+
+    async def compare(self, sample, candidate, config) -> Comparison:
+        same = detect(sample.output_text) == detect(candidate.text)
+        return Comparison(score=1.0 if same else 0.0, label="match" if same else "mismatch")
+```
+
+`score` is relative quality from 0 to 1, where 1 means as good as the original or better. `sample` contains the replayed `messages`, `params`, original `output_text`, tokens, cost, latency and any retrieval `context`. Every [evaluator](#1-custom-evaluators-server) is already a scorer as `eval:<name>`, so you often don't need a new scorer at all.
+
+### Sampler: which generations get replayed
+
+```python
+from tracelens_server.optimizer import Sampler, register_sampler
+from tracelens_server.optimizer.samplers import dedupe
+
+@register_sampler
+class MostExpensive(Sampler):
+    name = "most_expensive"
+    description = "The N costliest calls: where savings matter most"
+
+    def select(self, samples, n, config):
+        return sorted(dedupe(samples), key=lambda s: -(s.cost or 0))[:n]
+```
+
+### Policy: when to recommend a switch
+
+```python
+from tracelens_server.optimizer import Policy, register_policy
+from tracelens_server.optimizer.policies import recommendation
+from tracelens_server.evals import ConfigField
+
+@register_policy
+class Strict(Policy):
+    name = "strict"
+    description = "Switch only when the whole 95% CI stays above 0.98"
+    config_fields = [ConfigField("floor", "number", 0.98, "CI lower bound")]
+
+    def recommend(self, step, baseline, candidates, config):
+        ok = [c for c in candidates if c["price_known"] and c["quality_ci"] and c["quality_ci"][0] >= config.get("floor", 0.98)
+              and (c["cost_savings_pct"] or 0) > 0]
+        if not ok:
+            return recommendation(step, baseline, None, "keep", "No candidate is safely as good.")
+        best = max(ok, key=lambda c: c["cost_savings_pct"])
+        return recommendation(step, baseline, best, "switch", f"{best['candidate']} saves {best['cost_savings_pct']:.0f}%.")
+```
+
+Each candidate dict has `candidate`, `n`, `quality_mean`, `quality_ci`, `labels`, `price_known`, `cost_per_call`, `cost_savings_pct`, `latency_ms`, `latency_delta_pct`, `monthly_savings_usd`, `errors` and `examples`. `baseline` has `model`, `cost_per_call`, `latency_ms` and `monthly_calls_est`. Always build the result with `recommendation(...)`, so the dashboard, CLI and SDK can render it and it stays marked as an estimate.

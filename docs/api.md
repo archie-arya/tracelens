@@ -71,6 +71,19 @@ Authentication: `Authorization: Bearer tl-sk-...`. A Langfuse-style `Basic base6
 | `POST /api/v1/alerts/rules/{id}/check?test=false` | evaluate now. With `test=true`, a test webhook is always sent |
 | `GET /api/v1/alerts/events` | history |
 
+## Cost Optimizer
+
+See [cost-optimizer.md](cost-optimizer.md) for how runs work.
+
+| | |
+|---|---|
+| `GET /api/v1/optimizer/plugins` | registered providers (with `available`), scorers, samplers and policies, plus their `config_fields` and the run defaults |
+| `GET /api/v1/optimizer/steps?lookback_days=30` | LLM steps by spend: `step`, `calls`, `models`, `total_cost`, `avg_cost`, `avg_latency_ms`, `replayable`, `skipped` (reason → count), `monthly_cost_est` |
+| `POST /api/v1/optimizer/runs` | `{steps: ["trace / parent / name" or {name, trace_name, parent_name, model, tag}], candidates: ["provider:model"], name?, sample_size?=10, sampler?="recent", sampler_config?, scorer?="auto", scorer_config?, policy?="quality_threshold", policy_config?, max_spend_usd?=1.0, concurrency?=4, rpm?, redact?, lookback_days?=30, examples_per_candidate?=3, use_cache?=true, min_max_tokens?=1024}` → `202 {id, status: "queued"}`. `422` for an unknown provider, scorer or policy. At most 2 active runs per project |
+| `GET /api/v1/optimizer/runs` | runs without results: `id, name, status (queued/running/completed/failed/cancelled/interrupted), config, progress {total, done, spend_usd, cache_hits, errors}` |
+| `GET /api/v1/optimizer/runs/{id}` | the run plus `results: {summary, steps: [{step, baseline, candidates: [...], recommendation, skipped, sampled}]}`. Every recommendation has `estimate: true` |
+| `POST /api/v1/optimizer/runs/{id}/cancel`, `DELETE /api/v1/optimizer/runs/{id}` | stop a run or remove it |
+
 ## Projects & keys
 
 | | |
