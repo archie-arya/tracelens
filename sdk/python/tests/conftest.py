@@ -15,6 +15,14 @@ class MemoryExporter(Exporter):
         return [e["body"] for e in self.events if e["type"] == kind]
 
 
+@pytest.fixture(autouse=True)
+def _isolated_env(monkeypatch):
+    """Never let a developer's TRACELENS_* env send test traces to a real server."""
+    for k in ("TRACELENS_API_KEY", "TRACELENS_PUBLIC_KEY", "TRACELENS_SECRET_KEY", "TRACELENS_HOST", "TRACELENS_ENABLED",
+              "TRACELENS_SAMPLE_RATE", "TRACELENS_DEBUG", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+        monkeypatch.delenv(k, raising=False)
+
+
 @pytest.fixture
 def mem():
     exp = MemoryExporter()

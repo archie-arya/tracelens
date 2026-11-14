@@ -1,6 +1,6 @@
 """Populate a project with realistic traffic by actually running the example apps (real Gemini calls).
 
-    TRACELENS_API_KEY=... TRACELENS_HOST=... GEMINI_API_KEY=... python examples/seed_demo.py --minutes 30
+    TRACELENS_API_KEY=... TRACELENS_HOST=... GEMINI_API_KEY=... python demo/seed.py --minutes 30
 
 Creates eval rules + alert rules, then drives the RAG bot, the tool-calling agent, a JSON ticket classifier and
 multi-turn sessions with a mix of users, plus an experiment comparing two prompt versions.
@@ -13,7 +13,7 @@ import random
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "examples"))
 import tracelens  # noqa: E402
 
 rag = importlib.import_module("02_rag_gemini")

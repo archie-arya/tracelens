@@ -1,8 +1,10 @@
-# One-click deploy: https://render.com/deploy?repo=https://github.com/archie-arya/tracelens
+# Optional shared team instance on Render: New -> Blueprint, point it at this repo and set the blueprint path to deploy/render.yaml
 services:
   - type: web
     name: tracelens
     runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
     healthCheckPath: /api/health
     envVars:

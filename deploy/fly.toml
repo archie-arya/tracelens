@@ -1,9 +1,11 @@
-# fly launch --copy-config --no-deploy && fly volumes create tracelens_data --size 1 && fly secrets set GEMINI_API_KEY=... && fly deploy
+# Optional shared team instance on Fly.io. Run from the repo root:
+#   fly launch --config deploy/fly.toml --copy-config --no-deploy && fly volumes create tracelens_data --size 1
+#   fly secrets set GEMINI_API_KEY=... TRACELENS_INIT_API_KEY=... && fly deploy --config deploy/fly.toml
 app = "tracelens"
 primary_region = "sin"
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "../Dockerfile"
 
 [env]
   PORT = "8000"

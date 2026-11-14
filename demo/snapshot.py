@@ -1,16 +1,20 @@
 """Export the public demo project from a running server into static JSON for the GitHub Pages dashboard.
 
-    python scripts/snapshot_demo.py http://localhost:8080 demo/snapshot
+    python demo/snapshot.py http://localhost:8080 demo/snapshot
 """
 import json
 import os
+import shutil
 import sys
 import urllib.request
 
 base = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else "http://localhost:8080"
 out = sys.argv[2] if len(sys.argv) > 2 else "demo/snapshot"
+for d in ("traces", "optimizer"):  # start clean so deleted traces and runs disappear from the demo
+    shutil.rmtree(f"{out}/{d}", ignore_errors=True)
 os.makedirs(f"{out}/traces", exist_ok=True)
 os.makedirs(f"{out}/datasets", exist_ok=True)
+os.makedirs(f"{out}/optimizer", exist_ok=True)
 
 
 def get(path):
@@ -47,4 +51,11 @@ put("alert-events.json", get("/api/v1/alerts/events"))
 for d in get("/api/v1/datasets")["data"]:
     put(f"datasets/{d['id']}.json", get(f"/api/v1/datasets/{d['id']}"))
     put(f"datasets/{d['id']}-runs.json", get(f"/api/v1/datasets/{d['id']}/runs"))
+put("optimizer-plugins.json", get("/api/v1/optimizer/plugins"))
+put("optimizer-steps.json", get("/api/v1/optimizer/steps"))
+runs = [r for r in get("/api/v1/optimizer/runs")["data"] if r["status"] == "completed"]
+put("optimizer-runs.json", {"data": runs})
+for r in runs:
+    put(f"optimizer/{r['id']}.json", get(f"/api/v1/optimizer/runs/{r['id']}"))
+print(f"snapshot: {len(runs)} optimizer runs")
 print(f"snapshot: {len(traces)} traces -> {out}")
