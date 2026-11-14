@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tracelens"
+version = "0.1.0"
+description = "Plug-and-play LLM observability: tracing, cost, latency and evals for any Python LLM app."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Archie Arya" }]
+keywords = ["llm", "observability", "tracing", "openai", "gemini", "anthropic", "langchain", "evals"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = []  # zero required dependencies, stdlib only
+
+[project.optional-dependencies]
+otel = ["opentelemetry-sdk>=1.20", "opentelemetry-exporter-otlp-proto-http>=1.20"]
+dev = ["pytest>=7", "pytest-asyncio>=0.21"]
+
+[project.urls]
+Homepage = "https://github.com/archie-arya/tracelens"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tracelens"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
