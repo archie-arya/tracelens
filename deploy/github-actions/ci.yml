@@ -1,0 +1,70 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e "./server[dev]"
+      - run: cd server && pytest -q
+
+  server-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: tl, POSTGRES_PASSWORD: tl, POSTGRES_DB: tl }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e "./server[dev,postgres]"
+      - run: cd server && TRACELENS_TEST_DATABASE_URL=postgresql://tl:tl@localhost:5432/tl pytest -q
+
+  sdk-python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ matrix.python }}" }
+      - run: pip install -e "./sdk/python[dev]" openai anthropic langchain-core httpx
+      - run: cd sdk/python && pytest -q
+
+  sdk-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: cd sdk/js && npm install && npm run build && npm test
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: cd dashboard && npm ci && npx tsc --noEmit -p . && npx vite build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t tracelens .
+      - run: |
+          docker run -d -p 8000:8000 -e TRACELENS_INIT_API_KEY=tl-sk-ci tracelens
+          for i in $(seq 1 30); do curl -sf localhost:8000/api/health && break; sleep 1; done
+          curl -sf -X POST localhost:8000/api/v1/ingest -H "Authorization: Bearer tl-sk-ci" -H "Content-Type: application/json" \
+            -d '{"batch":[{"type":"trace","body":{"id":"ci1","name":"ci"}}]}'
+          curl -sf localhost:8000/api/v1/traces/ci1 -H "Authorization: Bearer tl-sk-ci"
