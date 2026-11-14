@@ -4,11 +4,11 @@
 
 # TraceLens
 
-**Open-source, self-hostable LLM observability. Trace every prompt, token, dollar and failure, and score quality automatically with LLM-as-judge evals.**
+**Local-first, open-source LLM observability. Run it on your own machine, point your app at `localhost`, and see every prompt, token, dollar and failure, with LLM-as-judge evals on top.**
 
-Plug-and-play SDKs · OpenTelemetry native · runs on SQLite or Postgres · free LLM judges (Gemini, Groq, Ollama)
+Your traces stay on your machine · 2-line SDK · OpenTelemetry native · SQLite by default, Postgres optional · free LLM judges (Gemini, Groq, or fully local with Ollama)
 
-[**Live demo →**](https://archie-arya.github.io/tracelens/) · [Quickstart](#-2-minute-quickstart) · [Integrations](#-integrations) · [Self-host](#-self-hosting) · [Extend it](docs/extending.md) · [API](docs/api.md)
+[**Run it locally →**](#-run-it-locally-2-minutes) · [See it in action (read-only demo)](https://archie-arya.github.io/tracelens/) · [Integrations](#-integrations) · [Extend it](docs/extending.md) · [API](docs/api.md)
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-indigo)
 ![Python SDK: zero deps](https://img.shields.io/badge/python%20sdk-zero%20deps-22d3ee)
@@ -18,12 +18,74 @@ Plug-and-play SDKs · OpenTelemetry native · runs on SQLite or Postgres · free
 
 ---
 
-TraceLens is a lightweight alternative to LangSmith and Langfuse that you can run anywhere with a single container. Add two lines to any Python app and every OpenAI, Groq, Gemini, Anthropic, LiteLLM or LangChain call shows up as a **nested trace**, with inputs and outputs, token usage, cost, latency, time-to-first-token and errors. Then let **evaluators** score each answer for relevance, faithfulness (hallucination), toxicity or your own rubric, and get a **webhook alert** when quality drops or costs spike.
+TraceLens is a lightweight, self-hosted alternative to LangSmith and Langfuse. There is no account and no cloud: you run one small server next to your app, and every OpenAI, Groq, Gemini, Anthropic, LiteLLM or LangChain call shows up as a **nested trace**, with inputs and outputs, token usage, cost, latency, time-to-first-token and errors. **Evaluators** then score each answer for relevance, faithfulness (hallucination), toxicity or your own rubric, and a **webhook alert** fires when quality drops or costs spike.
+
+Everything is stored in a SQLite file on your disk (`./data/tracelens.db`). Nothing is sent anywhere else, except the judge prompts if you turn on LLM evals with a cloud model. Use Ollama to keep even those local.
+
+## 🚀 Run it locally (2 minutes)
+
+**1. Start the server on your machine.** Pick one:
+
+```bash
+git clone https://github.com/archie-arya/tracelens && cd tracelens
+
+# a) One script, no Docker (Python 3.9+, plus Node 18+ for the dashboard)
+./scripts/run_local.sh
+
+# b) The same thing, by hand
+(cd dashboard && npm ci && VITE_OUT_DIR=../server/tracelens_server/static npx vite build)   # build the dashboard once
+python3 -m venv .venv && .venv/bin/pip install ./server
+TRACELENS_INIT_API_KEY=tl-sk-local-dev .venv/bin/tracelens-server --data-dir ./data
+
+# c) Docker: Postgres plus the server, data in a local volume
+cp .env.example .env && docker compose up -d
+```
+
+Open **<http://localhost:8000>**. The dashboard and the API are served by the same process, bound to `127.0.0.1` by default. Your API key is `tl-sk-local-dev` (`tl-sk-local-dev-change-me` with docker compose), or create more projects and keys under **Settings**.
+
+**2. Point your app at it.**
+
+```bash
+pip install "git+https://github.com/archie-arya/tracelens#subdirectory=sdk/python"
+```
 
 ```python
 import tracelens
-tracelens.init(api_key="tl-sk-...", host="http://localhost:8000")   # that's it: LLM calls are now traced
+tracelens.init(api_key="tl-sk-local-dev", host="http://localhost:8000")   # that's it: LLM calls are now traced
 ```
+
+Or leave the code at `tracelens.init()` and set `TRACELENS_API_KEY` / `TRACELENS_HOST` in the environment. A fuller example:
+
+```python
+import tracelens
+tracelens.init()                       # auto-instruments every supported LLM SDK that's installed
+
+from openai import OpenAI
+client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key="...")   # or OpenAI, Ollama, Gemini...
+
+@tracelens.observe()                   # optional: group multiple steps into one trace
+def answer(question: str, user_id: str) -> str:
+    tracelens.update_current_trace(user_id=user_id, tags=["prod"])
+    docs = search(question)            # decorate with @tracelens.observe(type="retrieval")
+    r = client.chat.completions.create(model="llama-3.1-8b-instant",
+                                       messages=[{"role": "user", "content": f"{docs}\n\n{question}"}])
+    return r.choices[0].message.content
+```
+
+No key and no server yet? `python examples/01_quickstart.py` runs without any LLM key. If the server is down, the SDK quietly turns into a no-op and never breaks your app.
+
+**3. Add evals (optional).** Give the server a judge model: a free Gemini key (`GEMINI_API_KEY`, from <https://aistudio.google.com/apikey>), a Groq key, or a fully local one with `TRACELENS_JUDGE_MODELS=ollama:llama3.1`. Then add a rule under **Evaluations → Online eval rules**, or use the API:
+
+```bash
+curl -X POST localhost:8000/api/v1/eval-rules -H "Authorization: Bearer tl-sk-local-dev" \
+  -H "Content-Type: application/json" -d '{"evaluator":"llm_faithfulness","sample_rate":0.5}'
+```
+
+Every new trace now gets a faithfulness score with the judge's reasoning.
+
+## 👀 See it in action
+
+**[archie-arya.github.io/tracelens](https://archie-arya.github.io/tracelens/)** is a read-only snapshot of a real TraceLens instance. It shows a Gemini RAG bot, a tool-calling agent, a ticket classifier, sessions, experiments and live LLM-judge scores. It's static, so nothing you do there is saved. Run it locally to trace your own app.
 
 ## ✨ Features
 
@@ -39,7 +101,7 @@ tracelens.init(api_key="tl-sk-...", host="http://localhost:8000")   # that's it:
 | **Alerts** | Rules on cost, error rate, latency, volume or average score over a sliding window. Alerts go to a Slack- or Discord-compatible webhook, with cooldowns. |
 | **Feedback** | `tracelens.score("user_feedback", True)` from your app, or via the REST API. |
 | **Production-safe SDK** | Zero dependencies. Export is async, batched and non-blocking, with retry and backoff, a bounded queue and a circuit breaker. Includes sampling, a PII redaction hook and a **no-op mode** when no key is set or the server is down. |
-| **Self-hostable** | One container. SQLite by default and Postgres for scale, behind a swappable storage interface. Multi-project API keys, a public read-only demo mode and a Langfuse-compatible ingestion endpoint. |
+| **Local-first** | Runs on your laptop with one command and keeps data in a local SQLite file. Also ships as one container. SQLite by default and Postgres for scale, behind a swappable storage interface. Multi-project API keys, a public read-only demo mode and a Langfuse-compatible ingestion endpoint. |
 
 ## 🏗 Architecture
 
@@ -69,55 +131,6 @@ flowchart LR
 * **SDK side:** calls are recorded in-process. On span end, an event goes onto a bounded in-memory queue, and a daemon thread batches events to the server. Your request path never waits on the network.
 * **Server side:** events are **upserts**, so they're idempotent and out-of-order safe. Spans can arrive before their trace, and retries never duplicate. Trace aggregates (cost, tokens, latency, models, status) are recomputed per batch. Completed traces trigger matching eval rules in the background.
 * **Storage:** every query goes through [`Storage`](server/tracelens_server/storage/base.py). The default `SQLStorage` runs on SQLite (WAL) or Postgres. Plug in ClickHouse, DuckDB or anything else with `TRACELENS_STORAGE=module:Class`.
-
-## 🚀 2-minute quickstart
-
-**1. Run the server** (pick one):
-
-```bash
-# a) Docker: SQLite, single container
-docker build -t tracelens . && docker run -p 8000:8000 -v tracelens:/data -e TRACELENS_INIT_API_KEY=tl-sk-local-dev -e GEMINI_API_KEY=$GEMINI_API_KEY tracelens
-
-# b) docker compose: Postgres
-cp .env.example .env && docker compose up -d
-
-# c) Plain Python
-pip install ./server && TRACELENS_INIT_API_KEY=tl-sk-local-dev tracelens-server
-```
-
-Open <http://localhost:8000>. The dashboard is served by the same process. Use the key you set, or create a project under **Settings** to get one.
-
-**2. Install the SDK and trace your app:**
-
-```bash
-pip install "git+https://github.com/archie-arya/tracelens#subdirectory=sdk/python"
-export TRACELENS_API_KEY=tl-sk-local-dev TRACELENS_HOST=http://localhost:8000
-```
-
-```python
-import tracelens
-tracelens.init()                       # auto-instruments every supported LLM SDK that's installed
-
-from openai import OpenAI
-client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key="...")   # or OpenAI, Ollama, Gemini...
-
-@tracelens.observe()                   # optional: group multiple steps into one trace
-def answer(question: str, user_id: str) -> str:
-    tracelens.update_current_trace(user_id=user_id, tags=["prod"])
-    docs = search(question)            # decorate with @tracelens.observe(type="retrieval")
-    r = client.chat.completions.create(model="llama-3.1-8b-instant",
-                                       messages=[{"role": "user", "content": f"{docs}\n\n{question}"}])
-    return r.choices[0].message.content
-```
-
-**3. Add evals.** Under **Evaluations → Online eval rules**, add `llm_relevance`, or use the API:
-
-```bash
-curl -X POST localhost:8000/api/v1/eval-rules -H "Authorization: Bearer $TRACELENS_API_KEY" \
-  -H "Content-Type: application/json" -d '{"evaluator":"llm_faithfulness","sample_rate":0.5}'
-```
-
-Every new trace now gets a faithfulness score with the judge's reasoning, using a free Gemini key by default.
 
 ## 🔌 Integrations
 
@@ -187,21 +200,27 @@ Everything is a plugin point. See **[docs/extending.md](docs/extending.md)** for
 * **Pricing**: `tracelens.pricing.register(...)` / `set_calculator(fn)` in the SDK, or `TRACELENS_PRICING_FILE` on the server.
 * **Judge models**: any provider/model chain through environment variables.
 
-## 🏠 Self-hosting
+## ⚙️ Configuration
+
+All settings are environment variables. The defaults are tuned for a single developer running locally.
 
 | Variable | Default | |
 |---|---|---|
-| `TRACELENS_DATABASE_URL` | `sqlite:///./data/tracelens.db` | or `postgresql://user:pass@host/db` |
+| `TRACELENS_DATABASE_URL` | `sqlite:///./data/tracelens.db` | or `postgresql://user:pass@host/db` (`--data-dir` sets the SQLite folder) |
+| `HOST` / `PORT` | `127.0.0.1` / `8000` | set `HOST=0.0.0.0` to accept traffic from other machines |
 | `TRACELENS_INIT_API_KEY` | random, printed in logs | fixed key for the `default` project |
 | `GEMINI_API_KEY` / `GROQ_API_KEY` / `OPENAI_API_KEY` + `OPENAI_BASE_URL` / `OLLAMA_BASE_URL` | – | judge providers |
 | `TRACELENS_JUDGE_MODELS` | Gemini flash-lite chain | `provider:model,...` fallback order |
 | `TRACELENS_ALLOW_SIGNUP` | `true` | anyone can create a project from the dashboard |
-| `TRACELENS_PUBLIC_DEMO` / `TRACELENS_DEMO_PROJECT` | `true` / `demo` | anonymous read-only access to one project |
+| `TRACELENS_PUBLIC_DEMO` / `TRACELENS_DEMO_PROJECT` | `false` / `demo` | anonymous read-only access to one project |
 | `TRACELENS_ADMIN_TOKEN` | – | enables `GET /api/v1/projects` |
 | `TRACELENS_PLUGINS`, `TRACELENS_STORAGE`, `TRACELENS_PRICING_FILE` | – | extensions |
 | `TRACELENS_LLM_EVALS_PER_HOUR` | `300` | per-project judge rate limit |
 
-Deploy configs are included for **Docker / docker compose**, **Fly.io** (`fly.toml`) and **Render** (`render.yaml`, free plan). The dashboard can also be hosted statically (GitHub Pages) and pointed at any server from **Settings → Server**.
+
+### Optional: a shared team instance
+
+Running locally is the default. If your team wants one shared server, run the same Docker image (or `docker compose`) on any machine or VM you control, set `HOST=0.0.0.0`, Postgres and a real `TRACELENS_INIT_API_KEY`, and point every app's `TRACELENS_HOST` at it. `fly.toml` and `render.yaml` are included as starting points for managed hosts. Put it behind HTTPS before sending production data.
 
 ## 🛠 Development
 

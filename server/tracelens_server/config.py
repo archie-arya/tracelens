@@ -17,7 +17,7 @@ class Settings:
     storage_backend: str = field(default_factory=lambda: os.environ.get("TRACELENS_STORAGE", ""))  # "module:Class" to plug a custom backend
     allow_signup: bool = field(default_factory=lambda: _bool("TRACELENS_ALLOW_SIGNUP", True))
     demo_project: str = field(default_factory=lambda: os.environ.get("TRACELENS_DEMO_PROJECT", "demo"))  # slug served read-only to anonymous users
-    public_demo: bool = field(default_factory=lambda: _bool("TRACELENS_PUBLIC_DEMO", True))
+    public_demo: bool = field(default_factory=lambda: _bool("TRACELENS_PUBLIC_DEMO", False))
     admin_token: str = field(default_factory=lambda: os.environ.get("TRACELENS_ADMIN_TOKEN", ""))
     demo_key: str = field(default_factory=lambda: os.environ.get("TRACELENS_DEMO_KEY", ""))  # write key for the demo project (seeding)
     init_api_key: str = field(default_factory=lambda: os.environ.get("TRACELENS_INIT_API_KEY", ""))  # known key for the "default" project

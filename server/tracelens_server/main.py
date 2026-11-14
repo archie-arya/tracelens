@@ -88,6 +88,18 @@ def create_app(storage: Storage | None = None, start_background: bool = True) ->
                 headers = {"Cache-Control": "public, max-age=31536000, immutable"} if "/assets/" in fp else {}
                 return FileResponse(fp, headers=headers)
             return FileResponse(os.path.join(static, "index.html"), headers={"Cache-Control": "no-cache"})
+    else:
+        logger.warning("Dashboard build not found at %s; serving the API only. Build it with: "
+                    "cd dashboard && npm ci && VITE_OUT_DIR=../server/tracelens_server/static npx vite build", static)
+
+        @app.get("/", include_in_schema=False)
+        async def no_dashboard():
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(
+                "<h2>TraceLens server is running</h2><p>The API is live (<a href='/docs'>/docs</a>), "
+                "but the dashboard build was not found.</p><p>Build it: <code>cd dashboard &amp;&amp; npm ci &amp;&amp; "
+                "VITE_OUT_DIR=../server/tracelens_server/static npx vite build</code>, then restart, "
+                "or use <code>docker compose up</code>.</p>")
     return app
 
 

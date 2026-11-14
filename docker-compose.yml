@@ -1,9 +1,9 @@
-# Self-host TraceLens in one command:  docker compose up -d   ->  http://localhost:8000
-# Uses Postgres; for a single-container SQLite setup just run:  docker run -p 8000:8000 -v tl:/data ghcr.io/... (see README)
+# Self-host TraceLens locally:  docker compose up -d   ->  http://localhost:8000  (data stays in the local "pgdata" volume)
+# No Docker? Run ./scripts/run_local.sh instead (SQLite in ./data).
 services:
   tracelens:
     build: .
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]   # local only; use "8000:8000" for a shared team instance
     environment:
       TRACELENS_DATABASE_URL: postgresql://tracelens:tracelens@db:5432/tracelens
       # Fixed key for the "default" project so your apps can start sending immediately (change it!)

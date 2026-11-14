@@ -29,6 +29,7 @@ tracelens-server = "tracelens_server.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tracelens_server"]
+artifacts = ["tracelens_server/static/**"]   # bundled dashboard build (git-ignored, included when present)
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

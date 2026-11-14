@@ -4,6 +4,7 @@ os.environ.setdefault("TRACELENS_DATABASE_URL", "sqlite://")
 os.environ["TRACELENS_INIT_API_KEY"] = "tl-sk-test-default"
 os.environ["TRACELENS_DEMO_KEY"] = "tl-sk-test-demo"
 os.environ["TRACELENS_ALERT_INTERVAL"] = "3600"
+os.environ["TRACELENS_PUBLIC_DEMO"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient
