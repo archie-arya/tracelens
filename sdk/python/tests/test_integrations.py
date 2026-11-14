@@ -1,7 +1,8 @@
 import json
 
-import httpx
 import pytest
+
+httpx = pytest.importorskip("httpx")
 
 import tracelens
 
