@@ -66,7 +66,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="flex min-w-0 items-center gap-2 text-sm">
             <span className="text-zinc-500">Project</span>
             <span className="truncate font-medium">{project?.name || "—"}</span>
-            {readOnly && <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">{staticMode ? "Static demo · read-only" : "Public demo · read-only"}</span>}
+            {readOnly && (staticMode || project) && <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">{staticMode ? "Static demo · read-only" : project?.is_demo ? "Public demo · read-only" : "Read-only"}</span>}
           </div>
           <div className="flex items-center gap-2">
             <div className="flex rounded-lg border border-zinc-800 p-0.5">
