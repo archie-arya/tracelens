@@ -11,3 +11,4 @@ data/
 .env
 server/tracelens_server/static/
 .DS_Store
+!sdk/js/dist/
