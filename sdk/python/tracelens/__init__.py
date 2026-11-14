@@ -30,7 +30,7 @@ __all__ = [
     "update_current_trace", "update_current_observation", "update_current_span", "get_client", "get_current_trace_id",
     "get_current_observation_id", "get_current_trace", "get_current_observation", "TraceLens", "Trace", "Observation",
     "Exporter", "HttpExporter", "ConsoleExporter", "FileExporter", "BatchProcessor", "pricing", "redact", "register_integration",
-    "trace_fn", "set_client",
+    "trace_fn", "set_client", "optimize",
 ]
 
 update_current_span = update_current_observation
@@ -83,6 +83,12 @@ def score(name: str, value: Any, trace_id: Optional[str] = None, observation_id:
 
 def flush(timeout: float = 10.0) -> bool:
     return get_client().flush(timeout)
+
+
+def optimize(steps: Any, candidates: Any, **kwargs: Any) -> Any:
+    """Cost Optimizer: replay a step's real traffic on cheaper models; see :mod:`tracelens.optimizer`."""
+    from .optimizer import optimize as _optimize
+    return _optimize(steps, candidates, **kwargs)
 
 
 def shutdown() -> None:

@@ -26,6 +26,8 @@ def list_evaluators() -> List[dict]:
 
 def load_plugins(modules: List[str]) -> None:
     from . import heuristic, llm_judge  # noqa: F401  built-ins register themselves
+    from ..optimizer.registry import load_builtins
+    load_builtins()  # optimizer providers/scorers/samplers/policies, so plugins can extend or override them
     for m in modules:
         try:
             importlib.import_module(m)
@@ -33,6 +35,11 @@ def load_plugins(modules: List[str]) -> None:
             logger.error("failed to load plugin %s: %s", m, e)
     try:
         from importlib.metadata import entry_points
+        for ep in entry_points(group="tracelens.plugins"):  # any module that registers evaluators or optimizer plugins
+            try:
+                ep.load()
+            except Exception as e:
+                logger.error("failed to load plugin entry point %s: %s", ep.name, e)
         for ep in entry_points(group="tracelens.evaluators"):
             try:
                 obj = ep.load()

@@ -440,6 +440,45 @@ class SQLStorage(Storage):
             return [_row(r) for r in c.execute(select(e).where(e.c.project_id == project_id).order_by(e.c.created_at.desc()).limit(limit))]
 
 
+    # --- cost optimizer
+    def save_optimizer_run(self, project_id: str, run: Dict[str, Any]) -> None:
+        t = db.optimizer_runs
+        row = {k: run.get(k) for k in ("id", "name", "status", "config", "progress", "results", "error", "created_at", "finished_at")}
+        row["project_id"] = project_id
+        with self._w(), self.engine.begin() as c:
+            c.execute(delete(t).where(and_(t.c.project_id == project_id, t.c.id == run["id"])))
+            c.execute(insert(t).values(**row))
+
+    def get_optimizer_run(self, project_id: str, run_id: str):
+        t = db.optimizer_runs
+        with self.engine.connect() as c:
+            r = c.execute(select(t).where(and_(t.c.project_id == project_id, t.c.id == run_id))).first()
+        return _row(r) if r else None
+
+    def list_optimizer_runs(self, project_id: str, limit: int = 50):
+        t = db.optimizer_runs
+        cols = [t.c.id, t.c.project_id, t.c.name, t.c.status, t.c.config, t.c.progress, t.c.error, t.c.created_at, t.c.finished_at]
+        with self.engine.connect() as c:
+            return [_row(r) for r in c.execute(select(*cols).where(t.c.project_id == project_id).order_by(t.c.created_at.desc()).limit(limit))]
+
+    def delete_optimizer_run(self, project_id: str, run_id: str) -> bool:
+        t = db.optimizer_runs
+        with self._w(), self.engine.begin() as c:
+            return c.execute(delete(t).where(and_(t.c.project_id == project_id, t.c.id == run_id))).rowcount > 0
+
+    def replay_cache_get(self, key: str):
+        t = db.replay_cache
+        with self.engine.connect() as c:
+            r = c.execute(select(t.c.value).where(t.c.key == key)).first()
+        return r[0] if r else None
+
+    def replay_cache_put(self, key: str, value: Dict[str, Any]) -> None:
+        t = db.replay_cache
+        with self._w(), self.engine.begin() as c:
+            c.execute(delete(t).where(t.c.key == key))
+            c.execute(insert(t).values(key=key, value=value, created_at=now()))
+
+
 class _NullCtx:
     def __enter__(self):
         return self

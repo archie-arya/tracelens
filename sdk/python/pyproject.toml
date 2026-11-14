@@ -22,6 +22,9 @@ dependencies = []  # zero required dependencies, stdlib only
 otel = ["opentelemetry-sdk>=1.20", "opentelemetry-exporter-otlp-proto-http>=1.20"]
 dev = ["pytest>=7", "pytest-asyncio>=0.21"]
 
+[project.scripts]
+tracelens = "tracelens.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/archie-arya/tracelens"
 

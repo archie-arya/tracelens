@@ -181,3 +181,35 @@ def test_unreachable_server_never_blocks():
             pass
     assert time.time() - t0 < 1.0
     c.shutdown(0.1)
+
+
+def test_optimizer_helpers_and_cli(monkeypatch, capsys):
+    from tracelens import cli, optimizer
+    calls = []
+
+    def fake_api(self, method, path, body=None, timeout=None):
+        calls.append((method, path, body))
+        if method == "POST":
+            return {"id": "opt_1", "name": "n", "status": "queued", "progress": {}}
+        if path == "/api/v1/project":
+            return {"id": "p1", "slug": "default", "name": "Default"}
+        return {"id": "opt_1", "status": "completed", "progress": {"done": 2, "total": 2, "spend_usd": 0.0},
+                "results": {"summary": {"disclaimer": "Estimates."}, "steps": [{
+                    "step": "qa / answer", "sampled": 2, "skipped": {}, "baseline": {"model": "big"},
+                    "candidates": [{"candidate": "g:small", "n": 2, "quality_mean": 1.0, "quality_ci": [1, 1], "cost_savings_pct": 90.0,
+                                    "latency_delta_pct": -20.0, "errors": 0}],
+                    "recommendation": {"action": "switch", "rationale": "cheaper", "confidence": "low", "n": 2, "to_model": "g:small"}}]}}
+
+    monkeypatch.setattr(tracelens.TraceLens, "api", fake_api)
+    c = tracelens.TraceLens(api_key="k", enabled=False)
+    run = optimizer.optimize(["qa / answer"], ["g:small"], client=c, sample_size=2)
+    assert optimizer.recommendations(run)[0]["to_model"] == "g:small"
+    assert calls[0] == ("POST", "/api/v1/optimizer/runs", {"steps": ["qa / answer"], "candidates": ["g:small"], "sample_size": 2})
+
+    cli.main(["--api-key", "k", "optimize", "--project", "default", "--step", "qa / answer", "--candidates", "g:small,g:tiny"])
+    out = capsys.readouterr().out
+    assert "SWITCH" in out and "g:small" in out and "-90%" in out
+    post = [b for m, p, b in calls if m == "POST"][-1]
+    assert post["candidates"] == ["g:small", "g:tiny"]
+    with pytest.raises(SystemExit):
+        cli.main(["--api-key", "k", "optimize", "--project", "other", "--step", "x", "--candidates", "a:b"])

@@ -76,6 +76,8 @@ def create_app(storage: Storage | None = None, start_background: bool = True) ->
         return await call_next(request)
 
     app.include_router(router)
+    from .optimizer.routes import router as optimizer_router
+    app.include_router(optimizer_router)
 
     static = settings.static_dir
     if os.path.isdir(static):

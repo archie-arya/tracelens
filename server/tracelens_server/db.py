@@ -181,3 +181,25 @@ alert_events = Table(
     Column("response", Text),
     Column("created_at", Float),
 )
+
+
+optimizer_runs = Table(
+    "optimizer_runs", metadata,
+    Column("project_id", String(64), primary_key=True),
+    Column("id", String(64), primary_key=True),
+    Column("name", String(300)),
+    Column("status", String(32)),
+    Column("config", JSON),
+    Column("progress", JSON),
+    Column("results", JSON),
+    Column("error", Text),
+    Column("created_at", Float),
+    Column("finished_at", Float),
+)
+
+replay_cache = Table(
+    "replay_cache", metadata,
+    Column("key", String(64), primary_key=True),
+    Column("value", JSON),
+    Column("created_at", Float),
+)

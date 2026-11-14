@@ -34,7 +34,10 @@ def _text(resp: Any) -> Any:
     t = safe(lambda: resp.text)
     if t is not None:
         return t
-    return safe(lambda: resp.candidates[0].content.model_dump(exclude_none=True))
+    # no plain text (e.g. a thinking model hit max_output_tokens): keep visible parts only, never the model's thoughts
+    parts = safe(lambda: resp.candidates[0].content.parts) or []
+    visible = "".join((getattr(p, "text", None) or "") for p in parts if not getattr(p, "thought", False))
+    return visible or None
 
 
 def _start(model: Any, kwargs: Dict[str, Any], args: tuple):

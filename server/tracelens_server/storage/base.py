@@ -145,6 +145,25 @@ class Storage(abc.ABC):
     def list_alert_events(self, project_id: str, limit: int = 100) -> List[Dict[str, Any]]: ...
 
     # ---- metrics (portable default implementation)
+    # --- cost optimizer (non-abstract so older custom backends keep working; override to support the optimizer)
+    def save_optimizer_run(self, project_id: str, run: Dict[str, Any]) -> None:
+        raise NotImplementedError("this storage backend does not support the cost optimizer")
+
+    def get_optimizer_run(self, project_id: str, run_id: str) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def list_optimizer_runs(self, project_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    def delete_optimizer_run(self, project_id: str, run_id: str) -> bool:
+        raise NotImplementedError
+
+    def replay_cache_get(self, key: str) -> Optional[Dict[str, Any]]:
+        return None
+
+    def replay_cache_put(self, key: str, value: Dict[str, Any]) -> None:
+        return None
+
     def metrics(self, project_id: str, start: float, end: float, bucket_seconds: Optional[int] = None) -> Dict[str, Any]:
         trows, grows, srows = self.metric_rows(project_id, start, end)
         return compute_metrics(trows, grows, srows, start, end, bucket_seconds)
