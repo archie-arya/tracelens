@@ -1,0 +1,12 @@
+{
+  "name": "tracelens-js",
+  "version": "0.1.0",
+  "description": "Zero-dependency TypeScript/JavaScript SDK for TraceLens LLM observability",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "src"],
+  "scripts": { "build": "tsc -p .", "test": "node --test test/*.test.mjs" },
+  "devDependencies": { "typescript": "^5.6.0", "@types/node": "^22.0.0" }
+}
