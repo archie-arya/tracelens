@@ -72,7 +72,7 @@ class HttpExporter(Exporter):
 
     def export(self, events: List[Event]) -> None:
         payload = json.dumps({"batch": to_jsonable(events)}, ensure_ascii=False).encode("utf-8")
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}", "User-Agent": "tracelens-python/0.1.0", **self.headers}
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}", "User-Agent": "tracelens-python/0.2.0", **self.headers}
         last: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
             try:

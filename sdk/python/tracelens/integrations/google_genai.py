@@ -5,13 +5,16 @@ import functools
 from typing import Any, Dict, Optional
 
 from ..client import get_client
+from ._tools import gemini_tool_calls, gemini_tool_definitions, messages_jsonable, tool_metadata, with_tool_calls
 from ._wrap import safe, unwrap_all, wrap
 
 
 def _contents(contents: Any) -> Any:
     if isinstance(contents, str):
         return [{"role": "user", "content": contents}]
-    return contents
+    if isinstance(contents, (list, tuple)):  # Content objects incl. function_call / function_response parts
+        return [{"role": "user", "content": c} if isinstance(c, str) else c for c in messages_jsonable(list(contents))]
+    return messages_jsonable([contents])[0] if contents is not None and not isinstance(contents, dict) else contents
 
 
 def _config(cfg: Any) -> Dict[str, Any]:
@@ -31,6 +34,11 @@ def _usage(resp: Any) -> Optional[Dict[str, Any]]:
 
 
 def _text(resp: Any) -> Any:
+    calls = safe(lambda: gemini_tool_calls(resp), [])
+    if calls:
+        parts = safe(lambda: resp.candidates[0].content.parts) or []
+        visible = "".join((getattr(p, "text", None) or "") for p in parts if not getattr(p, "thought", False))
+        return with_tool_calls(visible, calls)
     t = safe(lambda: resp.text)
     if t is not None:
         return t
@@ -38,6 +46,11 @@ def _text(resp: Any) -> Any:
     parts = safe(lambda: resp.candidates[0].content.parts) or []
     visible = "".join((getattr(p, "text", None) or "") for p in parts if not getattr(p, "thought", False))
     return visible or None
+
+
+def _chunk_text(chunk: Any) -> str:
+    parts = safe(lambda: chunk.candidates[0].content.parts) or []
+    return "".join((getattr(p, "text", None) or "") for p in parts if not getattr(p, "thought", False))
 
 
 def _start(model: Any, kwargs: Dict[str, Any], args: tuple):
@@ -48,7 +61,8 @@ def _start(model: Any, kwargs: Dict[str, Any], args: tuple):
     if sys_instr:
         inp = [{"role": "system", "content": safe(lambda: str(sys_instr))}] + (inp if isinstance(inp, list) else [inp])
     return get_client().start_observation("gemini.generate_content", type="generation", model=str(model or "").replace("models/", ""),
-                                          input=inp, model_parameters=_config(cfg), metadata={"provider": "gemini"})
+                                          input=inp, model_parameters=_config(cfg),
+                                          metadata={"provider": "gemini", **safe(lambda: tool_metadata(gemini_tool_definitions(cfg)), {})})
 
 
 def _end(obs: Any, resp: Any) -> None:
@@ -95,17 +109,18 @@ def _sync_stream(orig):
             yield from orig(self, *args, **kwargs)
             return
         obs = _start(kwargs.get("model"), kwargs, args)
-        parts, last = [], None
+        parts, last, calls = [], None, []
         try:
             for chunk in orig(self, *args, **kwargs):
                 obs.mark_first_token()
-                parts.append(safe(lambda: chunk.text) or "")
+                calls += safe(lambda: gemini_tool_calls(chunk), [])
+                parts.append(_chunk_text(chunk))
                 last = chunk
                 yield chunk
         except BaseException as e:
             obs.end(output="".join(parts), error=e)
             raise
-        obs.end(output="".join(parts), usage=_usage(last) if last is not None else None, metadata={"stream": True})
+        obs.end(output=with_tool_calls("".join(parts), calls), usage=_usage(last) if last is not None else None, metadata={"stream": True})
     return wrapper
 
 
@@ -118,17 +133,18 @@ def _async_stream(orig):
         obs = _start(kwargs.get("model"), kwargs, args)
 
         async def gen():
-            parts, last = [], None
+            parts, last, calls = [], None, []
             try:
                 async for chunk in stream:
                     obs.mark_first_token()
-                    parts.append(safe(lambda: chunk.text) or "")
+                    calls += safe(lambda: gemini_tool_calls(chunk), [])
+                    parts.append(_chunk_text(chunk))
                     last = chunk
                     yield chunk
             except BaseException as e:
                 obs.end(output="".join(parts), error=e)
                 raise
-            obs.end(output="".join(parts), usage=_usage(last) if last is not None else None, metadata={"stream": True})
+            obs.end(output=with_tool_calls("".join(parts), calls), usage=_usage(last) if last is not None else None, metadata={"stream": True})
         return gen()
     return wrapper
 

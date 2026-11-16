@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tracelens-server"
-version = "0.1.0"
+version = "0.2.0"
 description = "TraceLens server: ingestion, query API, metrics, evaluations and alerts for LLM apps."
 license = { text = "MIT" }
 requires-python = ">=3.10"

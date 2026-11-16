@@ -137,6 +137,8 @@ class MyGateway(Provider):
 
 Use it as `gateway:my-model`. Rate limiting, retries on 429 and 5xx, timeouts, caching and the spend cap are handled for you. Raise an `httpx.HTTPStatusError` (or any exception) on failure.
 
+To take part in tool-calling replays (`allow_tool_steps`), set `supports_tools = True`. `params["tools"]` then holds `[{"name", "description", "parameters"}]` (and possibly `params["tool_choice"]`), and `messages` can contain assistant `tool_calls` and `{"role": "tool", "tool_call_id", "name", "content"}` results. Return the model's calls as `Completion(tool_calls=[{"id", "name", "arguments"}])`, and never execute them. `OpenAICompatible` subclasses get this for free. Providers without it are skipped on tool steps, with a reason.
+
 ### Scorer: how a candidate output is compared with the original
 
 ```python
@@ -156,7 +158,7 @@ class SameLanguage(Scorer):
         return Comparison(score=1.0 if same else 0.0, label="match" if same else "mismatch")
 ```
 
-`score` is relative quality from 0 to 1, where 1 means as good as the original or better. `sample` contains the replayed `messages`, `params`, original `output_text`, tokens, cost, latency and any retrieval `context`. Every [evaluator](#1-custom-evaluators-server) is already a scorer as `eval:<name>`, so you often don't need a new scorer at all.
+`score` is relative quality from 0 to 1, where 1 means as good as the original or better. `sample` contains the replayed `messages`, `params`, original `output_text`, tokens, cost, latency and any retrieval `context`. For tool-calling steps it also has `tool_step=True`, `tools` (definitions) and `tool_calls` (the original calls), and `candidate.tool_calls` holds the candidate's calls. `tracelens_server.optimizer.tools.compare_tool_calls(original, candidate, mode)` gives you the built-in sub-scores to build on. Every [evaluator](#1-custom-evaluators-server) is already a scorer as `eval:<name>`, so you often don't need a new scorer at all.
 
 ### Sampler: which generations get replayed
 
@@ -195,4 +197,4 @@ class Strict(Policy):
         return recommendation(step, baseline, best, "switch", f"{best['candidate']} saves {best['cost_savings_pct']:.0f}%.")
 ```
 
-Each candidate dict has `candidate`, `n`, `quality_mean`, `quality_ci`, `labels`, `price_known`, `cost_per_call`, `cost_savings_pct`, `latency_ms`, `latency_delta_pct`, `monthly_savings_usd`, `errors` and `examples`. `baseline` has `model`, `cost_per_call`, `latency_ms` and `monthly_calls_est`. Always build the result with `recommendation(...)`, so the dashboard, CLI and SDK can render it and it stays marked as an estimate.
+Each candidate dict has `candidate`, `n`, `quality_mean`, `quality_ci`, `labels`, `price_known`, `cost_per_call`, `cost_savings_pct`, `latency_ms`, `latency_delta_pct`, `monthly_savings_usd`, `errors` and `examples`, plus `tool_agreement`, `decision_agreement` and `tool_n` (`None` / 0 on steps without tools). `baseline` has `model`, `cost_per_call`, `latency_ms` and `monthly_calls_est`. Always build the result with `recommendation(...)`, so the dashboard, CLI and SDK can render it and it stays marked as an estimate.

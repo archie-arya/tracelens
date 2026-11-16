@@ -7,6 +7,7 @@ import functools
 from typing import Any, Dict, Optional
 
 from ..client import get_client
+from ._tools import StreamToolCalls, messages_jsonable, openai_tool_calls, openai_tool_definitions, tool_metadata, with_tool_calls
 from ._wrap import safe, unwrap_all, wrap
 
 PARAMS = ("temperature", "top_p", "max_tokens", "max_completion_tokens", "n", "stop", "presence_penalty",
@@ -41,21 +42,25 @@ def _message_out(resp: Any) -> Any:
     if not choices:
         return None
     msg = choices[0].message
+    calls = openai_tool_calls(getattr(msg, "tool_calls", None))
+    fc = getattr(msg, "function_call", None)  # legacy functions API
+    if fc is not None and getattr(fc, "name", None):
+        calls.append({"id": None, "name": fc.name, "arguments": openai_tool_calls([{"function": fc}])[0]["arguments"]})
+    if len(choices) == 1:
+        return with_tool_calls(getattr(msg, "content", None), calls)
     out: Dict[str, Any] = {"role": getattr(msg, "role", "assistant"), "content": getattr(msg, "content", None)}
-    tcs = getattr(msg, "tool_calls", None)
-    if tcs:
-        out["tool_calls"] = [{"id": t.id, "name": t.function.name, "arguments": t.function.arguments} for t in tcs]
-    if len(choices) == 1 and not tcs:
-        return out["content"]
+    if calls:
+        out["tool_calls"] = calls
     return out
 
 
 def _start(resource: Any, kwargs: Dict[str, Any], kind: str):
     provider = provider_from(resource)
+    inp = kwargs.get("messages", kwargs.get("input", kwargs.get("prompt")))
     return get_client().start_observation(
         f"{provider}.{kind}", type="embedding" if kind == "embeddings" else "generation",
-        model=kwargs.get("model"), input=kwargs.get("messages", kwargs.get("input", kwargs.get("prompt"))),
-        model_parameters=_params(kwargs), metadata={"provider": provider, **({"tools": [t.get("function", {}).get("name") for t in kwargs["tools"] if isinstance(t, dict)]} if kwargs.get("tools") else {})},
+        model=kwargs.get("model"), input=messages_jsonable(inp) if kind == "chat" else inp,
+        model_parameters=_params(kwargs), metadata={"provider": provider, **safe(lambda: tool_metadata(openai_tool_definitions(kwargs)), {})},
     )
 
 
@@ -64,6 +69,7 @@ class _StreamProxy:
 
     def __init__(self, stream: Any, obs: Any):
         self._stream, self._obs, self._parts, self._usage, self._model = stream, obs, [], None, None
+        self._tools = StreamToolCalls()
 
     def __iter__(self):
         try:
@@ -101,13 +107,16 @@ class _StreamProxy:
             d = getattr(c, "delta", None)
             if d is not None and getattr(d, "content", None):
                 self._parts.append(d.content)
+            if d is not None and getattr(d, "tool_calls", None):
+                safe(lambda: self._tools.feed(d.tool_calls))
         if getattr(chunk, "usage", None):
             self._usage = _usage(chunk.usage)
 
     def _finish(self, error: Optional[BaseException] = None) -> None:
         if self._model and not self._obs.model:
             self._obs.model = self._model
-        self._obs.end(output="".join(self._parts), usage=self._usage, error=error, metadata={"stream": True})
+        out = with_tool_calls("".join(self._parts), safe(lambda: self._tools.result(), []))
+        self._obs.end(output=out, usage=self._usage, error=error, metadata={"stream": True})
 
 
 class _AsyncStreamProxy(_StreamProxy):

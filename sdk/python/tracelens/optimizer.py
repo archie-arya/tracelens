@@ -10,6 +10,10 @@
     for rec in recommendations(run):
         print(rec["step"], rec["action"], rec.get("to_model"), rec.get("cost_savings_pct"), rec.get("quality_delta_pct"))
 
+Agents: pass ``allow_tool_steps=True`` to also replay tool-calling steps. Each recorded LLM call is replayed once with the
+recorded messages, tool results and tool definitions; the ``tool_call_match`` scorer (picked by ``scorer="auto"``) checks
+the candidate makes the same tool calls, and ``tool_agreement`` appears per candidate in the results.
+
 Everything runs server-side (replays, scoring, caching, rate limits and the spend cap); this module just calls the API.
 """
 from __future__ import annotations
@@ -34,7 +38,8 @@ def plugins(client: Optional[TraceLens] = None) -> Dict[str, Any]:
 
 def start(steps: Sequence[Step], candidates: Sequence[str], client: Optional[TraceLens] = None, **options: Any) -> Dict[str, Any]:
     """Start an optimization run and return immediately. Options: sampler, sample_size, scorer, scorer_config, policy,
-    policy_config, max_spend_usd, concurrency, rpm, redact, lookback_days, examples_per_candidate, use_cache, name."""
+    policy_config, max_spend_usd, concurrency, rpm, redact, lookback_days, examples_per_candidate, use_cache, name,
+    allow_tool_steps (replay tool-calling steps with their recorded tool results; tools are never executed)."""
     body = {"steps": list(steps), "candidates": list(candidates), **{k: v for k, v in options.items() if v is not None}}
     return (client or get_client()).api("POST", "/api/v1/optimizer/runs", body)
 

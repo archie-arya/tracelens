@@ -24,7 +24,7 @@ from .decorators import observe, trace_fn, update_current_observation, update_cu
 from .exporters import BatchProcessor, ConsoleExporter, Exporter, FileExporter, HttpExporter
 from .integrations import instrument, register_integration, uninstrument
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "init", "observe", "trace", "span", "generation", "event", "score", "flush", "shutdown", "instrument", "uninstrument",
     "update_current_trace", "update_current_observation", "update_current_span", "get_client", "get_current_trace_id",

@@ -43,13 +43,18 @@ def _print_run(run: Dict[str, Any]) -> None:
         b = s["baseline"]
         print(f"\n■ {s['step']}  (baseline {b.get('model')}, {s['sampled']} sampled"
               + (f", skipped: {s['skipped']}" if s.get("skipped") else "") + ")")
-        rows = [["candidate", "n", "quality", "95% CI", "cost Δ", "latency Δ", "errors"]]
+        tools = bool(s.get("tool_step"))
+        rows = [["candidate", "n", "quality", "95% CI", "cost Δ", "latency Δ", "errors"] + (["tool agreement"] if tools else [])]
         for c in s["candidates"]:
             ci = c.get("quality_ci")
+            ta = c.get("tool_agreement")
             rows.append([c["candidate"], c["n"], "n/a" if c["quality_mean"] is None else f"{c['quality_mean']:.2f}",
                          "" if not ci else f"{ci[0]:.2f}-{ci[1]:.2f}", _fmt_pct(None if c.get("cost_savings_pct") is None else -c["cost_savings_pct"]),
-                         _fmt_pct(c.get("latency_delta_pct")), c.get("errors", 0)])
+                         _fmt_pct(c.get("latency_delta_pct")), c.get("errors", 0)] + ([("n/a" if ta is None else f"{ta * 100:.0f}%")] if tools else []))
         print(_table(rows))
+        for c in s["candidates"] if tools else []:
+            for m in (c.get("tool_mismatches") or [])[:2]:
+                print(f"  ✗ {c['candidate']}: {' → '.join(m['candidate'])}  (original: {' → '.join(m['original'])})")
         r = s["recommendation"]
         print(f"→ {r['action'].upper()}: {r.get('rationale', '')}" + (f"  [confidence: {r.get('confidence')}, n={r.get('n')}]" if r.get("confidence") else ""))
     if run.get("results"):
@@ -61,6 +66,8 @@ def cmd_optimize(a: argparse.Namespace) -> None:
     c = _client(a)
     opts = {"sample_size": a.sample_size, "scorer": a.scorer, "policy": a.policy, "sampler": a.sampler, "max_spend_usd": a.max_spend,
             "redact": True if a.redact else None, "name": a.name, "concurrency": a.concurrency,
+            "allow_tool_steps": True if a.allow_tool_steps else None,
+            "scorer_config": json.loads(a.scorer_config) if a.scorer_config else None,
             "policy_config": json.loads(a.policy_config) if a.policy_config else None}
     run = optimizer.start(a.step, [x for c_ in a.candidates for x in c_.split(",") if x], client=c, **opts)
     print(f"started {run['id']} ({run['name']})")
@@ -83,9 +90,10 @@ def cmd_optimize(a: argparse.Namespace) -> None:
 
 def cmd_steps(a: argparse.Namespace) -> None:
     from . import optimizer
-    rows = [["step", "calls", "replayable", "models", "avg cost", "est. monthly"]]
+    rows = [["step", "calls", "replayable", "+ with tools", "models", "avg cost", "est. monthly"]]
     for s in optimizer.list_steps(a.lookback_days, client=_client(a)):
-        rows.append([s["step"], s["calls"], s["replayable"], ",".join(s["models"]), f"${s['avg_cost'] or 0:.6f}", f"${s['monthly_cost_est']:.4f}"])
+        rows.append([s["step"], s["calls"], s["replayable"], s.get("replayable_with_tools", s["replayable"]), ",".join(s["models"]),
+                     f"${s['avg_cost'] or 0:.6f}", f"${s['monthly_cost_est']:.4f}"])
     print(_table(rows))
 
 
@@ -111,7 +119,10 @@ def main(argv: Any = None) -> None:
     o.add_argument("--candidates", action="append", required=True, help="provider:model[,provider:model...] (repeatable)")
     o.add_argument("--sample-size", type=int)
     o.add_argument("--sampler")
-    o.add_argument("--scorer", help="auto | pairwise_judge | json_match | exact_match | similarity | eval:<evaluator>")
+    o.add_argument("--scorer", help="auto | tool_call_match | pairwise_judge | json_match | exact_match | similarity | eval:<evaluator>")
+    o.add_argument("--scorer-config", help='JSON, e.g. \'{"args_mode": "strict"}\'')
+    o.add_argument("--allow-tool-steps", action="store_true",
+                   help="also replay tool-calling steps (one call per step with the recorded tool results; tools are never executed)")
     o.add_argument("--policy", help="quality_threshold | budget | weighted | <plugin>")
     o.add_argument("--policy-config", help='JSON, e.g. \'{"max_quality_drop": 0.03}\'')
     o.add_argument("--max-spend", type=float, help="USD cap for replay calls (default 1.0)")

@@ -1,6 +1,6 @@
 import { clsx } from "clsx";
-import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, CircleDollarSign, Play, Scale, Square, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, ChevronRight, CircleDollarSign, Play, Scale, Square, Trash2, Wrench, X } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { CartesianGrid, Label, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from "recharts";
 import { api, useApi } from "../api";
@@ -31,7 +31,8 @@ function EstimateNote({ text }: { text?: string }) {
       <span>
         <b>Estimates, not guarantees.</b>{" "}
         {text || "Costs use list prices from the pricing table; quality is judged relative to the original outputs on a sample of real prompts."} Only LLM
-        generations are replayed. Tool calls are never executed, and prompts are redacted first when redaction is enabled.
+        generations are replayed. Tool-calling steps are replayed one call at a time with the recorded tool results; tools are never executed, and prompts
+        are redacted first when redaction is enabled.
       </span>
     </div>
   );
@@ -117,13 +118,18 @@ export default function Optimizer() {
                     </td>
                     <td className="td">{s.calls}</td>
                     <td className="td" title={Object.entries(s.skipped || {}).map(([k, v]) => `${v}× ${k}`).join("\n")}>
-                      {s.replayable}
-                      {s.replayable < s.calls && <span className="text-zinc-600"> / {s.calls}</span>}
+                      {Math.max(s.replayable, s.replayable_with_tools ?? 0)}
+                      {Math.max(s.replayable, s.replayable_with_tools ?? 0) < s.calls && <span className="text-zinc-600"> / {s.calls}</span>}
+                      {(s.tool_calls ?? 0) > 0 && (
+                        <span className="ml-1.5 inline-flex items-center gap-0.5 rounded border border-sky-500/30 px-1 text-[10px] text-sky-300" title={`${s.tool_calls} tool-calling LLM calls (replayed with allow_tool_steps)`}>
+                          <Wrench className="h-2.5 w-2.5" /> tools
+                        </span>
+                      )}
                     </td>
                     <td className="td whitespace-nowrap">{fmtCost(s.monthly_cost_est)}</td>
                     {!readOnly && (
                       <td className="td">
-                        {s.replayable > 0 && (
+                        {Math.max(s.replayable, s.replayable_with_tools ?? 0) > 0 && (
                           <button className="text-xs text-indigo-300 hover:underline" onClick={() => (setPreset(s.step), setShowForm(true))}>
                             optimize
                           </button>
@@ -151,6 +157,7 @@ function NewRun({ steps, preset, onDone }: { steps: any[]; preset: string | null
   const [policy, setPolicy] = useState("quality_threshold");
   const [spend, setSpend] = useState(0.5);
   const [redact, setRedact] = useState(false);
+  const [tools, setTools] = useState(() => !!(preset && steps.find((s) => s.step === preset && (s.tool_calls ?? 0) > 0)));
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -164,7 +171,7 @@ function NewRun({ steps, preset, onDone }: { steps: any[]; preset: string | null
     try {
       const run = await api<any>("/api/v1/optimizer/runs", {
         method: "POST",
-        body: { steps: sel, candidates: cands.split(",").map((c) => c.trim()).filter(Boolean), sample_size: size, scorer, policy, max_spend_usd: spend, redact },
+        body: { steps: sel, candidates: cands.split(",").map((c) => c.trim()).filter(Boolean), sample_size: size, scorer, policy, max_spend_usd: spend, redact, allow_tool_steps: tools },
       });
       onDone();
       nav(`/optimizer/${run.id}`);
@@ -180,12 +187,13 @@ function NewRun({ steps, preset, onDone }: { steps: any[]; preset: string | null
         <div>
           <div className="label mb-1.5">Steps to optimize</div>
           <div className="max-h-56 space-y-1 overflow-auto rounded-lg border border-zinc-800 p-2">
-            {steps.filter((s) => s.replayable > 0).map((s) => (
+            {steps.filter((s) => (tools ? s.replayable_with_tools ?? s.replayable : s.replayable) > 0).map((s) => (
               <label key={s.step} className="flex cursor-pointer items-center gap-2 text-xs">
                 <input type="checkbox" checked={sel.includes(s.step)} onChange={(e) => setSel(e.target.checked ? [...sel, s.step] : sel.filter((x) => x !== s.step))} />
                 <span className="font-mono">{s.step}</span>
                 <span className="text-zinc-600">
-                  {s.replayable} calls · {Object.keys(s.models)[0]}
+                  {tools ? s.replayable_with_tools ?? s.replayable : s.replayable} calls · {Object.keys(s.models)[0]}
+                  {(s.tool_calls ?? 0) > 0 && " · tools"}
                 </span>
               </label>
             ))}
@@ -231,6 +239,10 @@ function NewRun({ steps, preset, onDone }: { steps: any[]; preset: string | null
           </div>
           <label className="flex items-center gap-2 text-xs text-zinc-400">
             <input type="checkbox" checked={redact} onChange={(e) => setRedact(e.target.checked)} /> Redact PII (emails, keys, cards, phones) in prompts before replaying
+          </label>
+          <label className="flex items-center gap-2 text-xs text-zinc-400">
+            <input type="checkbox" checked={tools} onChange={(e) => setTools(e.target.checked)} /> Replay tool-calling steps (agents): one call per step with the
+            recorded tool results, scored on the tool calls. Tools are never executed.
           </label>
           {err && <ErrorBox error={err} />}
           <button className="btn btn-primary" disabled={busy || !sel.length || !cands.trim()} onClick={submit}>
@@ -315,7 +327,158 @@ export function OptimizerRun() {
         {(run.results?.steps || []).map((s: any) => (
           <StepResult key={s.step} s={s} />
         ))}
+        {(run.results?.trajectories || []).length > 0 && <Trajectories items={run.results.trajectories} candidates={run.config.candidates || []} />}
       </div>
+    </div>
+  );
+}
+
+const agreeTone = (v?: number | null) => (v === null || v === undefined ? "text-zinc-500" : v >= 0.95 ? "text-emerald-300" : v >= 0.8 ? "text-amber-300" : "text-red-300");
+
+function Calls({ calls, text, tone }: { calls: string[]; text?: string | null; tone?: string }) {
+  if (!calls?.length)
+    return <span className="text-[11px] italic text-zinc-500">{text ? `answers: ${text.length > 90 ? text.slice(0, 90) + "…" : text}` : "answers without a tool call"}</span>;
+  return (
+    <span className="flex flex-col gap-0.5">
+      {calls.map((c, i) => (
+        <code key={i} className={clsx("break-all text-[11px]", tone || "text-zinc-300")}>
+          {c}
+        </code>
+      ))}
+    </span>
+  );
+}
+
+function Trajectories({ items, candidates }: { items: any[]; candidates: string[] }) {
+  const [open, setOpen] = useState<string | null>(items[0]?.trace_id ?? null);
+  const used = candidates.filter((c) => items.some((t) => t.agreement?.[c] !== null && t.agreement?.[c] !== undefined));
+  return (
+    <Card
+      title={
+        <span className="flex items-center gap-2">
+          <Wrench className="h-4 w-4 text-sky-300" /> Tool-call trajectories
+        </span>
+      }
+      actions={<span className="text-xs text-zinc-500">original run vs. each candidate's decision at every replayed step</span>}
+    >
+      <p className="mb-3 text-xs text-zinc-500">
+        Each replayed step gets the original history (including the recorded tool results) and is compared on the tool calls it makes. This shows
+        step-by-step decision agreement; it does not simulate where a candidate's own run would have gone after a different decision.
+      </p>
+      <table className="w-full">
+        <thead>
+          <tr>
+            <th className="th">Trace</th>
+            <th className="th">LLM steps</th>
+            {used.map((c) => (
+              <th key={c} className="th font-mono normal-case">
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((t) => (
+            <Fragment key={t.trace_id}>
+              <tr className="cursor-pointer border-t border-zinc-800/70 hover:bg-zinc-900/60" onClick={() => setOpen(open === t.trace_id ? null : t.trace_id)}>
+                <td className="td">
+                  <span className="flex items-center gap-1 font-mono text-xs">
+                    {open === t.trace_id ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    {t.trace_name || "trace"} <span className="text-zinc-600">{t.trace_id.slice(0, 8)}</span>
+                  </span>
+                </td>
+                <td className="td text-xs text-zinc-400">
+                  {t.steps.length} · {t.steps.filter((s: any) => s.calls.length).length} with tool calls
+                </td>
+                {used.map((c) => (
+                  <td key={c} className={clsx("td font-medium", agreeTone(t.agreement?.[c]))}>
+                    {t.agreement?.[c] === null || t.agreement?.[c] === undefined ? "–" : `${Math.round(t.agreement[c] * 100)}%`}
+                  </td>
+                ))}
+              </tr>
+              {open === t.trace_id && (
+                <tr>
+                  <td colSpan={2 + used.length} className="bg-zinc-950/40 px-3 pb-3">
+                    <div className="space-y-2 pt-2">
+                      {t.steps.map((st: any, i: number) => (
+                        <div key={st.observation_id} className="grid gap-2 rounded-lg border border-zinc-800 p-2 md:grid-cols-[110px_1fr_1.4fr]">
+                          <div className="text-[11px] text-zinc-500">
+                            step {i + 1}
+                            <div className="font-mono text-zinc-600">{st.model}</div>
+                          </div>
+                          <div>
+                            <div className="label mb-0.5">Original</div>
+                            <Calls calls={st.calls} text={st.text} />
+                          </div>
+                          <div className="space-y-1">
+                            {!st.replayed && <span className="text-[11px] text-zinc-600">not replayed</span>}
+                            {Object.entries(st.candidates || {}).map(([c, v]: [string, any]) => (
+                              <div key={c} className="flex items-start gap-1.5">
+                                {v.agree ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" /> : <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />}
+                                <div>
+                                  <div className="font-mono text-[10px] text-zinc-500">{c}</div>
+                                  <Calls calls={v.calls} text={v.text} tone={v.agree ? "text-emerald-200/90" : "text-red-200/90"} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      <Link to={`/traces/${t.trace_id}`} className="text-xs text-indigo-300 hover:underline">
+                        open trace
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+function ToolMismatches({ candidates }: { candidates: any[] }) {
+  const withM = candidates.filter((c) => c.tool_mismatches?.length);
+  const [open, setOpen] = useState(false);
+  if (!withM.length) return null;
+  return (
+    <div className="mt-4 border-t border-zinc-800 pt-3">
+      <button className="flex items-center gap-1 text-xs font-medium text-zinc-300" onClick={() => setOpen(!open)}>
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />} Mismatched tool calls ({withM.reduce((a, c) => a + c.tool_mismatches.length, 0)})
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          {withM.map((c) => (
+            <div key={c.candidate}>
+              <div className="mb-1.5 font-mono text-[11px] text-zinc-400">{c.candidate}</div>
+              <div className="space-y-2">
+                {c.tool_mismatches.map((m: any) => (
+                  <div key={m.observation_id} className="rounded-lg border border-zinc-800 p-2">
+                    <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px]">
+                      <span className="text-amber-300/90">{m.reason}</span>
+                      <Link to={`/traces/${m.trace_id}`} className="text-indigo-300 hover:underline">
+                        trace
+                      </Link>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <div className="rounded-md border border-zinc-800 bg-zinc-900/60 p-2">
+                        <div className="label mb-1">Original</div>
+                        <Calls calls={m.original[0]?.startsWith("(") ? [] : m.original} text={m.original_text} />
+                      </div>
+                      <div className="rounded-md border border-red-900/40 bg-red-500/[0.03] p-2">
+                        <div className="label mb-1">Candidate</div>
+                        <Calls calls={m.candidate[0]?.startsWith("(") ? [] : m.candidate} text={m.candidate_text} tone="text-red-200/90" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -357,6 +520,14 @@ function RecCard({ r }: { r: any }) {
             value={fmtCost(r.monthly_savings_usd)}
             good={r.action === "switch" && (r.monthly_savings_usd ?? 0) > 0}
           />
+        </div>
+      )}
+      {r.tool_agreement !== undefined && r.tool_agreement !== null && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+          <span className="flex items-center gap-1">
+            <Wrench className="h-3.5 w-3.5 text-sky-300" /> Same tool calls in <b className={agreeTone(r.tool_agreement)}>{Math.round(r.tool_agreement * 100)}%</b> of {r.tool_n} replays
+          </span>
+          {r.decision_agreement !== null && r.decision_agreement !== undefined && <span>· call/answer decision agrees {Math.round(r.decision_agreement * 100)}%</span>}
         </div>
       )}
       <p className="mt-3 text-sm text-zinc-400">{r.rationale}</p>
@@ -434,6 +605,7 @@ function StepResult({ s }: { s: any }) {
                   <th className="th">Cost / call</th>
                   <th className="th">Δ cost</th>
                   <th className="th">p50 latency</th>
+                  {s.tool_step && <th className="th" title="Replays where the candidate made the same tool calls (names, order, arguments) as the original">Tool agreement</th>}
                   <th className="th">Verdicts</th>
                 </tr>
               </thead>
@@ -445,6 +617,7 @@ function StepResult({ s }: { s: any }) {
                   <td className="td">{fmtCost(base.cost_per_call)}</td>
                   <td className="td">–</td>
                   <td className="td">{fmtMs(base.latency_ms)}</td>
+                  {s.tool_step && <td className="td">100%</td>}
                   <td className="td" />
                 </tr>
                 {s.candidates.map((c: any) => (
@@ -466,6 +639,14 @@ function StepResult({ s }: { s: any }) {
                     <td className="td">
                       {fmtMs(c.latency_ms)} <span className="text-[11px] text-zinc-500">{pct(c.latency_delta_pct)}</span>
                     </td>
+                    {s.tool_step && (
+                      <td className="td" title={c.tool_n ? `decision ${qual(c.decision_agreement)} · names+order ${qual(c.tool_name_agreement)} · args ${qual(c.tool_args_match)} over ${c.tool_n} replays` : undefined}>
+                        <span className={clsx("font-medium", agreeTone(c.tool_agreement))}>{qual(c.tool_agreement)}</span>
+                        {c.decision_agreement !== null && c.decision_agreement !== undefined && (
+                          <div className="text-[10px] text-zinc-500">decision {qual(c.decision_agreement)}</div>
+                        )}
+                      </td>
+                    )}
                     <td className="td text-[11px] text-zinc-400">{Object.entries(c.labels || {}).map(([k, v]) => `${v} ${k}`).join(", ")}</td>
                   </tr>
                 ))}
@@ -474,6 +655,7 @@ function StepResult({ s }: { s: any }) {
           </div>
         </div>
       )}
+      <ToolMismatches candidates={s.candidates} />
       <Examples candidates={s.candidates} />
     </Card>
   );
@@ -520,6 +702,7 @@ function Examples({ candidates }: { candidates: any[] }) {
                 <div className="grid gap-2 md:grid-cols-2">
                   <div className="rounded-md border border-zinc-800 bg-zinc-900/60 p-2">
                     <div className="label mb-1">Original · {fmtMs(e.original_latency_ms)}</div>
+                    {e.original_tool_calls?.length > 0 && <Calls calls={e.original_tool_calls} />}
                     <pre className="whitespace-pre-wrap break-words font-sans text-xs text-zinc-300">{e.original}</pre>
                   </div>
                   <div className="rounded-md border border-emerald-900/50 bg-emerald-500/[0.03] p-2">
@@ -527,6 +710,7 @@ function Examples({ candidates }: { candidates: any[] }) {
                       {cur.candidate} · {fmtMs(e.candidate_latency_ms)} · {fmtCost(e.candidate_cost)}
                       {e.cached ? " · cached" : ""}
                     </div>
+                    {e.candidate_tool_calls?.length > 0 && <Calls calls={e.candidate_tool_calls} tone={e.tool_agreement ? "text-emerald-200/90" : "text-red-200/90"} />}
                     <pre className="whitespace-pre-wrap break-words font-sans text-xs text-zinc-300">{e.candidate}</pre>
                   </div>
                 </div>

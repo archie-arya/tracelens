@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from typing import Any, Dict, List, Optional
@@ -13,6 +14,7 @@ from ..config import settings
 from ..evals.base import ConfigField
 from .base import Completion, Provider
 from .registry import provider_registry, register_provider
+from .tools import parse_args
 
 
 class RateLimiter:
@@ -95,10 +97,54 @@ def _text_content(c: Any) -> str:
     return str(c)
 
 
+def _json_args(a: Any) -> str:
+    return a if isinstance(a, str) else json.dumps(a if a is not None else {}, ensure_ascii=False)
+
+
+def openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Canonical optimizer messages -> OpenAI chat wire format (assistant tool_calls and tool results included)."""
+    out: List[Dict[str, Any]] = []
+    for m in messages:
+        role = m.get("role", "user")
+        if role == "tool":
+            out.append({"role": "tool", "tool_call_id": m.get("tool_call_id") or "call_0", "content": _text_content(m.get("content"))})
+        elif m.get("tool_calls"):
+            out.append({"role": "assistant", "content": _text_content(m.get("content")) or None,
+                        "tool_calls": [{"id": c.get("id") or f"call_{i}", "type": "function",
+                                        "function": {"name": c["name"], "arguments": _json_args(c.get("arguments"))}}
+                                       for i, c in enumerate(m["tool_calls"])]})
+        else:
+            out.append({"role": role, "content": _text_content(m.get("content"))})
+    return out
+
+
+def openai_tools(params: Dict[str, Any]) -> Dict[str, Any]:
+    tools = params.get("tools") or []
+    if not tools:
+        return {}
+    body: Dict[str, Any] = {"tools": [{"type": "function", "function": {"name": t["name"], "description": t.get("description") or "",
+                                                                         "parameters": t.get("parameters") or {"type": "object", "properties": {}}}}
+                                      for t in tools]}
+    tc = params.get("tool_choice")
+    if tc in ("auto", "required", "none"):
+        body["tool_choice"] = tc
+    elif tc == "any":
+        body["tool_choice"] = "required"
+    return body
+
+
+def parse_openai_tool_calls(msg: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    tcs = msg.get("tool_calls") or []
+    calls = [{"id": t.get("id"), "name": (t.get("function") or {}).get("name"), "arguments": parse_args((t.get("function") or {}).get("arguments"))}
+             for t in tcs if (t.get("function") or {}).get("name")]
+    return calls
+
+
 class OpenAICompatible(Provider):
     """Any ``/chat/completions`` API. Subclass and set ``base_url`` / ``key_env`` to add a new one."""
     base_url: str = "https://api.openai.com/v1"
     key_env: Optional[str] = "OPENAI_API_KEY"
+    supports_tools = True
     config_fields = [ConfigField("rpm", "number", 60, "requests per minute")]
 
     def _base(self) -> str:
@@ -111,7 +157,7 @@ class OpenAICompatible(Provider):
         return bool(self._key())
 
     async def complete(self, model: str, messages: List[Dict[str, Any]], params: Dict[str, Any]) -> Completion:
-        body: Dict[str, Any] = {"model": model, "messages": [{"role": m.get("role", "user"), "content": _text_content(m.get("content"))} for m in messages]}
+        body: Dict[str, Any] = {"model": model, "messages": openai_messages(messages), **openai_tools(params)}
         for k in ("temperature", "top_p", "max_tokens", "stop", "seed"):
             if params.get(k) is not None:
                 body[k] = params[k]
@@ -123,8 +169,10 @@ class OpenAICompatible(Provider):
             r.raise_for_status()
             d = r.json()
         u = d.get("usage") or {}
-        return Completion(text=(d["choices"][0]["message"].get("content") or ""), input_tokens=u.get("prompt_tokens"),
-                          output_tokens=u.get("completion_tokens"), latency_ms=round((time.perf_counter() - t0) * 1000, 1), raw_model=d.get("model"))
+        msg = d["choices"][0]["message"]
+        return Completion(text=(msg.get("content") or ""), input_tokens=u.get("prompt_tokens"),
+                          output_tokens=u.get("completion_tokens"), latency_ms=round((time.perf_counter() - t0) * 1000, 1), raw_model=d.get("model"),
+                          tool_calls=parse_openai_tool_calls(msg) if params.get("tools") else None)
 
 
 @register_provider
@@ -181,21 +229,36 @@ class GeminiProvider(Provider):
     name = "gemini"
     description = "Google Gemini / Gemma via the Gemini API (GEMINI_API_KEY); free tier available"
     default_rpm = 12
+    supports_tools = True
 
     def available(self) -> bool:
         return bool(settings.gemini_api_key)
 
     async def complete(self, model: str, messages: List[Dict[str, Any]], params: Dict[str, Any]) -> Completion:
         system = "\n".join(_text_content(m.get("content")) for m in messages if m.get("role") in ("system", "developer"))
-        contents = []
+        contents: List[Dict[str, Any]] = []
         for m in messages:
             role = m.get("role", "user")
             if role in ("system", "developer"):
                 continue
-            text = _text_content(m.get("content"))
-            if not text:
+            if role == "tool":  # recorded tool result, sent back as data (never executed)
+                part = {"functionResponse": {"name": m.get("name") or "tool", "response": _gemini_response(m.get("content"))}}
+                if contents and contents[-1]["role"] == "user" and all("functionResponse" in p for p in contents[-1]["parts"]):
+                    contents[-1]["parts"].append(part)
+                else:
+                    contents.append({"role": "user", "parts": [part]})
                 continue
-            contents.append({"role": "model" if role == "assistant" else "user", "parts": [{"text": text}]})
+            text = _text_content(m.get("content"))
+            parts: List[Dict[str, Any]] = [{"text": text}] if text else []
+            for i, c in enumerate(m.get("tool_calls") or []):
+                fc: Dict[str, Any] = {"functionCall": {"name": c["name"], "args": c.get("arguments") if isinstance(c.get("arguments"), dict) else {}}}
+                # recorded history carries no thought signatures (and may come from another model); Gemini 3 requires one,
+                # and this documented placeholder skips the check
+                fc["thoughtSignature"] = "skip_thought_signature_validator"
+                parts.append(fc)
+            if not parts:
+                continue
+            contents.append({"role": "model" if role == "assistant" else "user", "parts": parts})
         cfg: Dict[str, Any] = {}
         if params.get("temperature") is not None:
             cfg["temperature"] = params["temperature"]
@@ -203,11 +266,18 @@ class GeminiProvider(Provider):
             cfg["topP"] = params["top_p"]
         if params.get("max_tokens"):
             cfg["maxOutputTokens"] = params["max_tokens"]
-        if params.get("json"):
+        if params.get("json") and not params.get("tools"):
             cfg["responseMimeType"] = "application/json"
         body: Dict[str, Any] = {"contents": contents or [{"role": "user", "parts": [{"text": ""}]}], "generationConfig": cfg}
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
+        if params.get("tools"):
+            body["tools"] = [{"functionDeclarations": [{"name": t["name"], "description": t.get("description") or "",
+                                                        "parameters": gemini_schema(t.get("parameters") or {"type": "object", "properties": {}})}
+                                                       for t in params["tools"]]}]
+            mode = {"required": "ANY", "any": "ANY", "none": "NONE", "auto": "AUTO"}.get(str(params.get("tool_choice") or ""))
+            if mode:
+                body["toolConfig"] = {"functionCallingConfig": {"mode": mode}}
         t0 = time.perf_counter()
         async with httpx.AsyncClient(timeout=90) as c:
             r = await c.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent", json=body,
@@ -217,14 +287,53 @@ class GeminiProvider(Provider):
         parts = ((d.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
         u = d.get("usageMetadata") or {}
         out_tokens = (u.get("candidatesTokenCount") or 0) + (u.get("thoughtsTokenCount") or 0)
-        return Completion(text="".join(p.get("text", "") for p in parts if not p.get("thought")), input_tokens=u.get("promptTokenCount"),
-                          output_tokens=out_tokens or None, latency_ms=round((time.perf_counter() - t0) * 1000, 1), raw_model=d.get("modelVersion"))
+        calls = [{"id": p["functionCall"].get("id"), "name": p["functionCall"].get("name"), "arguments": p["functionCall"].get("args") or {}}
+                 for p in parts if isinstance(p.get("functionCall"), dict)]
+        text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+        finish = (d.get("candidates") or [{}])[0].get("finishReason")
+        if not text and not calls and finish == "MALFORMED_FUNCTION_CALL":  # the model tried to call a tool and produced invalid output
+            text = "[malformed function call]"
+        return Completion(text=text, input_tokens=u.get("promptTokenCount"),
+                          output_tokens=out_tokens or None, latency_ms=round((time.perf_counter() - t0) * 1000, 1), raw_model=d.get("modelVersion"),
+                          tool_calls=calls if params.get("tools") else None)
+
+
+_GEMINI_SCHEMA_KEYS = {"type", "format", "description", "nullable", "enum", "properties", "required", "items", "minItems", "maxItems",
+                       "minimum", "maximum", "anyOf", "propertyOrdering", "title", "minLength", "maxLength", "pattern"}
+
+
+def gemini_schema(s: Any) -> Any:
+    """JSON schema -> the OpenAPI subset accepted by Gemini's functionDeclarations.parameters."""
+    if isinstance(s, list):
+        return [gemini_schema(x) for x in s]
+    if not isinstance(s, dict):
+        return s
+    out: Dict[str, Any] = {}
+    for k, v in s.items():
+        if k not in _GEMINI_SCHEMA_KEYS:
+            continue
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {pk: gemini_schema(pv) for pk, pv in v.items()}
+        elif k == "type" and isinstance(v, list):  # ["string", "null"]
+            types = [t for t in v if t != "null"]
+            out["type"] = types[0] if types else "string"
+            if "null" in v:
+                out["nullable"] = True
+        else:
+            out[k] = gemini_schema(v)
+    return out
+
+
+def _gemini_response(content: Any) -> Dict[str, Any]:
+    v = parse_args(content) if isinstance(content, str) else content
+    return v if isinstance(v, dict) else {"result": v}
 
 
 @register_provider
 class LiteLLMProvider(Provider):
     name = "litellm"
     description = "Any of LiteLLM's 100+ providers (pip install litellm); e.g. litellm:anthropic/claude-3-5-haiku-latest"
+    supports_tools = True
 
     def available(self) -> bool:
         try:
@@ -237,15 +346,22 @@ class LiteLLMProvider(Provider):
         import litellm
         kw = {k: params[k] for k in ("temperature", "top_p", "max_tokens", "stop") if params.get(k) is not None}
         t0 = time.perf_counter()
-        r = await litellm.acompletion(model=model, messages=messages, **kw)
+        kw.update(openai_tools(params))
+        r = await litellm.acompletion(model=model, messages=openai_messages(messages), **kw)
         u = getattr(r, "usage", None)
         cost = None
         try:
             cost = litellm.completion_cost(completion_response=r)
         except Exception:
             pass
-        return Completion(text=r.choices[0].message.content or "", input_tokens=getattr(u, "prompt_tokens", None),
-                          output_tokens=getattr(u, "completion_tokens", None), latency_ms=round((time.perf_counter() - t0) * 1000, 1), cost=cost)
+        msg = r.choices[0].message
+        calls = None
+        if params.get("tools"):
+            calls = [{"id": getattr(t, "id", None), "name": t.function.name, "arguments": parse_args(t.function.arguments)}
+                     for t in (getattr(msg, "tool_calls", None) or [])]
+        return Completion(text=msg.content or "", input_tokens=getattr(u, "prompt_tokens", None),
+                          output_tokens=getattr(u, "completion_tokens", None), latency_ms=round((time.perf_counter() - t0) * 1000, 1), cost=cost,
+                          tool_calls=calls)
 
 
 def get_provider(name: str) -> Optional[Provider]:

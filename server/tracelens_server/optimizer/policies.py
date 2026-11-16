@@ -34,6 +34,8 @@ def recommendation(step: str, baseline: Dict[str, Any], best: Optional[Dict[str,
                     "quality_ci": best.get("quality_ci"), "latency_delta_pct": best.get("latency_delta_pct"),
                     "monthly_savings_usd": best.get("monthly_savings_usd"), "n": best.get("n", 0),
                     "confidence": confidence(best.get("n", 0), best.get("quality_ci"), threshold)})
+        if best.get("tool_agreement") is not None:
+            rec.update({"tool_agreement": best["tool_agreement"], "decision_agreement": best.get("decision_agreement"), "tool_n": best.get("tool_n")})
     return rec
 
 
@@ -52,11 +54,15 @@ class QualityThreshold(Policy):
     config_fields = [ConfigField("max_quality_drop", "number", 0.05, "Allowed average quality drop (0.05 = 5%)"),
                      ConfigField("min_savings_pct", "number", 10, "Only recommend switches that save at least this much"),
                      ConfigField("min_samples", "number", 5, "Minimum scored replays per candidate"),
-                     ConfigField("max_latency_increase_pct", "number", None, "Optional: reject candidates slower than this (e.g. 50)")]
+                     ConfigField("max_latency_increase_pct", "number", None, "Optional: reject candidates slower than this (e.g. 50)"),
+                     ConfigField("min_tool_agreement", "number", 0.95, "Tool-calling steps: share of replays where the candidate makes the "
+                                 "same tool calls (names, order, arguments) as the original; null disables")]
 
     def recommend(self, step, baseline, candidates, config):
         drop, min_sav, min_n = float(config.get("max_quality_drop", 0.05)), float(config.get("min_savings_pct", 10)), int(config.get("min_samples", 5))
         max_lat = config.get("max_latency_increase_pct")
+        mta = config.get("min_tool_agreement", 0.95)
+        mta = None if mta is None else float(mta)
         usable = [c for c in candidates if _usable(c, min_n)]
         if not usable:
             return recommendation(step, baseline, None, "insufficient_data", f"No candidate has ≥{min_n} scored replays with a known price.")
@@ -64,23 +70,33 @@ class QualityThreshold(Policy):
         def fast_enough(c):
             return max_lat is None or c.get("latency_delta_pct") is None or c["latency_delta_pct"] <= float(max_lat)
 
-        ok = [c for c in usable if c["quality_mean"] >= 1 - drop and (c.get("cost_savings_pct") or 0) >= min_sav and fast_enough(c)]
+        def tools_agree(c):
+            return mta is None or c.get("tool_agreement") is None or c["tool_agreement"] >= mta
+
+        ok = [c for c in usable if c["quality_mean"] >= 1 - drop and (c.get("cost_savings_pct") or 0) >= min_sav and fast_enough(c) and tools_agree(c)]
         if ok:
             best = max(ok, key=lambda c: (c["cost_savings_pct"], c["quality_mean"]))
             lat = f" and {_pct(best.get('latency_delta_pct'))} latency" if best.get("latency_delta_pct") is not None else ""
+            tools = ""
+            if best.get("tool_agreement") is not None:
+                tools = f"; it makes the same tool calls in {best['tool_agreement'] * 100:.0f}% of them"
             return recommendation(step, baseline, best, "switch",
                                   f"{best['candidate']} is {best['cost_savings_pct']:.0f}% cheaper with {(best['quality_mean'] - 1) * 100:+.1f}% "
-                                  f"relative quality{lat} over {best['n']} replays (threshold -{drop * 100:.0f}%).", 1 - drop)
+                                  f"relative quality{lat} over {best['n']} replays (threshold -{drop * 100:.0f}%){tools}.", 1 - drop)
         closest = max(usable, key=lambda c: (c["quality_mean"], c.get("cost_savings_pct") or 0))
 
         def why(c):
-            if (c.get("cost_savings_pct") or 0) < min_sav:
-                sav = c.get("cost_savings_pct") or 0
-                return (f"{c['candidate']} is only {sav:.0f}% cheaper (need {min_sav:.0f}%)" if sav > 0
-                        else f"{c['candidate']} costs more ({_pct(-sav)})")
+            reasons = []
+            sav = c.get("cost_savings_pct") or 0
+            if sav < min_sav:
+                reasons.append(f"is only {sav:.0f}% cheaper (need {min_sav:.0f}%)" if sav > 0 else f"costs more ({_pct(-sav)})")
             if c["quality_mean"] < 1 - drop:
-                return f"{c['candidate']} loses {(1 - c['quality_mean']) * 100:.0f}% quality (allowed {drop * 100:.0f}%)"
-            return f"{c['candidate']} is {_pct(c.get('latency_delta_pct'))} slower (allowed +{float(max_lat):.0f}%)"
+                reasons.append(f"loses {(1 - c['quality_mean']) * 100:.0f}% quality (allowed {drop * 100:.0f}%)")
+            if not tools_agree(c):
+                reasons.append(f"makes the same tool calls in only {c['tool_agreement'] * 100:.0f}% of replays (need {mta * 100:.0f}%)")
+            if not fast_enough(c):
+                reasons.append(f"is {_pct(c.get('latency_delta_pct'))} slower (allowed +{float(max_lat):.0f}%)")
+            return f"{c['candidate']} " + (", ".join(reasons[:-1]) + " and " + reasons[-1] if len(reasons) > 1 else reasons[0])
         return recommendation(step, baseline, closest, "keep", f"Keep {baseline.get('model')}: " + "; ".join(why(c) for c in usable) + ".", 1 - drop)
 
 

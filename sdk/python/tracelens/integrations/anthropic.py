@@ -5,26 +5,26 @@ import functools
 from typing import Any, Dict
 
 from ..client import get_client
+from ._tools import anthropic_tool_definitions, messages_jsonable, parse_args, tool_metadata, with_tool_calls
 from ._wrap import safe, unwrap_all, wrap
 
 PARAMS = ("max_tokens", "temperature", "top_p", "top_k", "stop_sequences", "tool_choice")
 
 
 def _start(kwargs: Dict[str, Any]):
-    msgs = list(kwargs.get("messages") or [])
+    msgs = messages_jsonable(list(kwargs.get("messages") or []))
     if kwargs.get("system"):
         msgs = [{"role": "system", "content": kwargs["system"]}] + msgs
     return get_client().start_observation("anthropic.messages", type="generation", model=kwargs.get("model"), input=msgs,
-                                          model_parameters={k: kwargs[k] for k in PARAMS if k in kwargs}, metadata={"provider": "anthropic"})
+                                          model_parameters={k: kwargs[k] for k in PARAMS if k in kwargs},
+                                          metadata={"provider": "anthropic", **safe(lambda: tool_metadata(anthropic_tool_definitions(kwargs.get("tools"))), {})})
 
 
 def _out(resp: Any) -> Any:
     blocks = getattr(resp, "content", None) or []
     texts = [b.text for b in blocks if getattr(b, "type", None) == "text"]
-    tools = [{"name": b.name, "input": b.input} for b in blocks if getattr(b, "type", None) == "tool_use"]
-    if tools:
-        return {"content": "".join(texts), "tool_calls": tools}
-    return "".join(texts)
+    tools = [{"id": getattr(b, "id", None), "name": b.name, "arguments": parse_args(b.input)} for b in blocks if getattr(b, "type", None) == "tool_use"]
+    return with_tool_calls("".join(texts), tools)
 
 
 def _end(obs: Any, resp: Any) -> None:
@@ -36,21 +36,29 @@ def _end(obs: Any, resp: Any) -> None:
 class _Acc:
     def __init__(self, obs):
         self.obs, self.parts, self.inp, self.out = obs, [], None, None
+        self.tools: dict = {}
 
     def feed(self, ev: Any) -> None:
         self.obs.mark_first_token()
         t = getattr(ev, "type", "")
         if t == "message_start":
             self.inp = safe(lambda: ev.message.usage.input_tokens)
+        elif t == "content_block_start" and safe(lambda: ev.content_block.type) == "tool_use":
+            cb = ev.content_block
+            self.tools[safe(lambda: ev.index, len(self.tools))] = {"id": getattr(cb, "id", None), "name": getattr(cb, "name", ""), "json": ""}
         elif t == "content_block_delta":
             txt = safe(lambda: ev.delta.text)
             if txt:
                 self.parts.append(txt)
+            pj = safe(lambda: ev.delta.partial_json)
+            if pj and safe(lambda: ev.index) in self.tools:
+                self.tools[ev.index]["json"] += pj
         elif t == "message_delta":
             self.out = safe(lambda: ev.usage.output_tokens)
 
     def done(self, error=None):
-        self.obs.end(output="".join(self.parts), usage={"input": self.inp, "output": self.out}, error=error, metadata={"stream": True})
+        calls = [{"id": c["id"], "name": c["name"], "arguments": parse_args(c["json"])} for _, c in sorted(self.tools.items())]
+        self.obs.end(output=with_tool_calls("".join(self.parts), calls), usage={"input": self.inp, "output": self.out}, error=error, metadata={"stream": True})
 
 
 def _sync(orig):

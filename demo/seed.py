@@ -42,6 +42,13 @@ AGENT_TASKS = [
     "Customer cus_001 needs 18% GST added to their monthly bill. What's the total?",
     "Compare the monthly price difference between Starter and Pro for 4 seats.",
     "Customer cus_002 wants to move to Pro. What's the new monthly price and support SLA?",
+    # v0.2: more agent traffic for tool-call evaluation (lookups, multi-tool chains, and tasks that need no tool at all)
+    "Which region is customer cus_002 in, and is GPU available there?",
+    "Customer cus_001 has 5 seats on Pro. What is their monthly bill?",
+    "What's 12 months of Starter with the annual discount?",
+    "Say hi to the customer in one short sentence.",
+    "Customer cus_003 wants to know their plan.",
+    "Is two-factor authentication available on the Starter plan?",
 ]
 TICKETS = [
     "My invoice shows two charges for November, please fix!!", "The dashboard is down in Mumbai region since 10am", "How do I add a teammate?",
@@ -119,7 +126,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=30)
     ap.add_argument("--skip-experiment", action="store_true")
+    ap.add_argument("--only", choices=["agent"], help="only drive the tool-calling agent (e.g. to refresh tool-call evaluation data)")
+    ap.add_argument("--repeat", type=int, default=1, help="with --only agent: run each task this many times")
     a = ap.parse_args()
+    if a.only == "agent":
+        jobs = [t for t in AGENT_TASKS for _ in range(a.repeat)]
+        for i, t in enumerate(jobs):
+            print(f"[{i + 1}/{len(jobs)}] agent: {t[:70]}")
+            safe(agent.run_agent, t, user_id=random.choice(USERS))
+            tracelens.flush()
+            time.sleep(max(0.0, a.minutes * 60 / len(jobs)))
+        tracelens.flush()
+        return
     setup_rules()
     jobs = ([("rag", q) for q in RAG_QS] + [("agent", t) for t in AGENT_TASKS] + [("ticket", t) for t in TICKETS]
             + [("session", s) for s in SESSIONS] + [("fallback", "Summarize Acme Cloud's refund policy in one line.")] * 2)

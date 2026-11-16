@@ -47,6 +47,11 @@ class Sample:
     start_time: Optional[float] = None
     redacted: bool = False
     context: List[str] = field(default_factory=list)
+    # tool-calling steps (only built when the run sets ``allow_tool_steps``); tools are never executed
+    tool_step: bool = False
+    tools: List[Dict[str, Any]] = field(default_factory=list)      # [{"name", "description", "parameters"}]
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)  # original calls: [{"id", "name", "arguments"}]
+    tool_choice: Optional[Any] = None
 
 
 @dataclass
@@ -59,6 +64,7 @@ class Completion:
     error: Optional[str] = None
     cached: bool = False
     raw_model: Optional[str] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None  # [{"id", "name", "arguments"}] returned by the candidate (never executed)
 
 
 @dataclass
@@ -80,8 +86,13 @@ class _Plugin:
 
 
 class Provider(_Plugin):
-    """Runs one chat completion. ``model`` is the part after ``provider:`` in a candidate spec."""
-    local: bool = False               # local models (e.g. Ollama) cost $0 regardless of the pricing table
+    """Runs one chat completion. ``model`` is the part after ``provider:`` in a candidate spec.
+
+    Tool-calling steps: when ``supports_tools`` is True, ``params`` may contain ``tools`` (canonical definitions) and
+    ``tool_choice``, and ``messages`` may contain assistant ``tool_calls`` and ``{"role": "tool"}`` results. Return the
+    model's calls in ``Completion.tool_calls``; never execute them."""
+    local: bool = False
+    supports_tools: bool = False               # local models (e.g. Ollama) cost $0 regardless of the pricing table
     default_rpm: int = 60             # requests per minute budget (override with TRACELENS_OPTIMIZER_RPM_<NAME>)
 
     def available(self) -> bool:
@@ -93,7 +104,7 @@ class Provider(_Plugin):
     @classmethod
     def describe(cls) -> Dict[str, Any]:
         d = super().describe()
-        d.update({"local": cls.local, "available": cls().available(), "default_rpm": cls.default_rpm})
+        d.update({"local": cls.local, "available": cls().available(), "default_rpm": cls.default_rpm, "supports_tools": cls.supports_tools})
         return d
 
 

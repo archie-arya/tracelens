@@ -6,14 +6,16 @@ import functools
 
 from ..client import get_client
 from ._wrap import safe, wrap
+from ._tools import messages_jsonable, openai_tool_definitions, tool_metadata
 from .openai import _message_out, _params, _usage
 
 
 def _start(kwargs):
     model = kwargs.get("model", "")
     provider = model.split("/")[0] if "/" in model else "litellm"
-    return get_client().start_observation(f"litellm.{provider}", type="generation", model=model, input=kwargs.get("messages"),
-                                          model_parameters=_params(kwargs), metadata={"provider": provider, "via": "litellm"})
+    return get_client().start_observation(f"litellm.{provider}", type="generation", model=model, input=messages_jsonable(kwargs.get("messages")),
+                                          model_parameters=_params(kwargs),
+                                          metadata={"provider": provider, "via": "litellm", **safe(lambda: tool_metadata(openai_tool_definitions(kwargs)), {})})
 
 
 def _end(obs, resp):

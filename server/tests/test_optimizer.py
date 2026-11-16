@@ -9,7 +9,7 @@ from tracelens_server import pricing
 from tracelens_server.optimizer import Completion, Provider, register_provider
 from tracelens_server.optimizer.base import Sample
 from tracelens_server.optimizer.policies import QualityThreshold
-from tracelens_server.optimizer.replay import build_sample, normalize_messages
+from tracelens_server.optimizer.replay import SKIP_TOOL_OUTPUT, build_sample, normalize_messages
 from tracelens_server.optimizer.scorers import JsonMatch, PairwiseJudge
 
 CALLS = []
@@ -133,7 +133,7 @@ def test_optimizer_end_to_end(client):
     steps = client.get("/api/v1/optimizer/steps", headers=KEY).json()["data"]
     st = next(s for s in steps if s["name"] == "answer")
     assert st["step"] == "qa / answer" and st["calls"] == 7 and st["replayable"] == 6
-    assert "output is a tool call (tools are never replayed)" in st["skipped"]
+    assert SKIP_TOOL_OUTPUT in st["skipped"]
 
     assert client.post("/api/v1/optimizer/runs", json={"steps": ["answer"], "candidates": ["fake:fake-good"]}).status_code in (401, 403)
     bad = client.post("/api/v1/optimizer/runs", json={"steps": ["answer"], "candidates": ["nope:x"]}, headers=KEY)
@@ -145,7 +145,7 @@ def test_optimizer_end_to_end(client):
     done = _wait(client, run["id"])
     assert done["status"] == "completed", done.get("error")
     step = done["results"]["steps"][0]
-    assert step["sampled"] == 5 and step["skipped"] == {"output is a tool call (tools are never replayed)": 1}
+    assert step["sampled"] == 5 and step["skipped"] == {SKIP_TOOL_OUTPUT: 1}
     good = next(c for c in step["candidates"] if c["model"] == "fake-good")
     badc = next(c for c in step["candidates"] if c["model"] == "fake-bad")
     assert good["quality_mean"] == 1.0 and badc["quality_mean"] == 0.0 and good["cost_savings_pct"] > 90

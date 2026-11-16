@@ -55,6 +55,7 @@ class RunIn(BaseModel):
     examples_per_candidate: Optional[int] = None
     use_cache: Optional[bool] = None
     min_max_tokens: Optional[int] = None
+    allow_tool_steps: Optional[bool] = None
 
 
 @router.post("/runs", status_code=202)

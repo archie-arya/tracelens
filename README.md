@@ -98,7 +98,7 @@ Every new trace now gets a faithfulness score with the judge's reasoning.
 | **Metrics** | Volume, cost, tokens, p50/p95/p99 latency, error rate and TTFT over time, broken down by model, workflow, user and tag. |
 | **Evaluations** | LLM-as-judge (relevance, faithfulness/hallucination, toxicity, correctness, custom rubric) and heuristics (JSON validity, regex, length, keywords, exact match, similarity, latency budget). You can run them **online** with sampling rules, in batches, from a playground or on a single trace. Write your own with one small class. |
 | **Datasets & experiments** | Golden datasets plus `run_experiment()` to compare prompt or model versions side by side with scores, latency and cost. |
-| **Cost Optimizer** | Replays sampled production prompts, per step, on cheaper candidate models (Gemini, Groq, Ollama, any OpenAI-compatible API, LiteLLM), scores them against the original outputs, and recommends switches with cost, quality and latency deltas, a confidence level and side-by-side examples. Tool calls are never replayed. Spend is capped and replays are cached. |
+| **Cost Optimizer** | Replays sampled production prompts, per step, on cheaper candidate models (Gemini, Groq, Ollama, any OpenAI-compatible API, LiteLLM), scores them against the original outputs, and recommends switches with cost, quality and latency deltas, a confidence level and side-by-side examples. Agent steps can be included: they are scored on the tool calls the candidate makes, and tools are never executed. Spend is capped and replays are cached. |
 | **Alerts** | Rules on cost, error rate, latency, volume or average score over a sliding window. Alerts go to a Slack- or Discord-compatible webhook, with cooldowns. |
 | **Feedback** | `tracelens.score("user_feedback", True)` from your app, or via the REST API. |
 | **Production-safe SDK** | Zero dependencies. Export is async, batched and non-blocking, with retry and backoff, a bounded queue and a circuit breaker. Includes sampling, a PII redaction hook and a **no-op mode** when no key is set or the server is down. |
@@ -208,7 +208,22 @@ tracelens optimize --step "support-rag / gemini.generate_content" \
 
 The same is available from the dashboard (*Cost Optimizer*: pick a step, add candidates, run), from Python (`tracelens.optimize(steps=[...], candidates=[...])`), and from `POST /api/v1/optimizer/runs`. Free candidates work out of the box: the Gemini free tier with `GEMINI_API_KEY`, or local Ollama models, which always cost $0. Providers, scorers, samplers and policies are all plugins.
 
-Results are **estimates**: list prices, and quality relative to the original output, on a sample. Only `generation` calls without tools are replayed, and inputs can be redacted first (`--redact`). Read **[docs/cost-optimizer.md](docs/cost-optimizer.md)** for the design and caveats.
+Results are **estimates**: list prices, and quality relative to the original output, on a sample. Only `generation` calls are replayed (tool-calling ones only with `--allow-tool-steps`), and inputs can be redacted first (`--redact`). Read **[docs/cost-optimizer.md](docs/cost-optimizer.md)** for the design and caveats.
+
+### Agent / tool-call evaluation
+
+For agents, the final answer is only part of the picture: a cheaper model can reach the same answer while calling the wrong tool, skipping a lookup, or passing different arguments. Since v0.2 the SDK records the tool definitions offered to the model, the tool calls it returned, and the tool results fed back on every LLM span (OpenAI-compatible clients, Anthropic, Gemini and LiteLLM), and the optimizer can replay those steps:
+
+```bash
+tracelens optimize --step "billing-agent / gemini.chat" --allow-tool-steps \
+                   --candidates gemini:gemini-flash-lite-latest,groq:llama-3.1-8b-instant --sample-size 20
+```
+
+* Each recorded LLM call is replayed **once**, with the recorded messages, the recorded tool results and the same tool schemas. The candidate's tool calls are compared, never executed, and nothing is sent back to it afterwards.
+* The `tool_call_match` scorer (chosen by `auto` for these steps) checks the call-vs-answer decision, tool names, order and arguments (`args_mode`: `lenient` by default, `strict` for exact JSON, or `partial`; `ignore_args` skips free-text arguments such as search queries). It reports each sub-score, and final-answer turns are judged on their text. `judge_weight` blends a text score into tool-call turns.
+* Each candidate gets a **tool agreement** rate: the share of replays with the same calls, names, order and arguments. `quality_threshold` will only recommend a switch at `min_tool_agreement` (0.95) or above. The run page lists mismatched calls next to the originals, and a per-trace trajectory view compares the original run's tool sequence with each candidate's decision at every step.
+
+It's off by default, so existing runs behave exactly as before. Traces recorded with SDK 0.1 don't have tool schemas, so their tool steps are still skipped. Details: [docs/cost-optimizer.md](docs/cost-optimizer.md#tool-calling-steps-agents).
 
 ## 🧩 Extensibility
 

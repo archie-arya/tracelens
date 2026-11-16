@@ -9,6 +9,13 @@ The read-only demo at <https://archie-arya.github.io/tracelens/> is the normal d
 | `snapshot.py` | Exports the demo project (traces, metrics, scores, datasets, alerts, Cost Optimizer runs) to `snapshot/` |
 | `snapshot/` | The exported data. `.github/workflows/pages.yml` builds and publishes the dashboard with it on every push |
 
+Refresh only the agent data (tool-calling traces for the optimizer's tool-call evaluation), then run an agent optimizer run:
+
+```bash
+python demo/seed.py --only agent --repeat 2 --minutes 12
+tracelens optimize --step "billing-agent / gemini.chat" --allow-tool-steps --candidates gemini:gemma-4-26b-a4b-it,gemini:gemini-flash-lite-latest --sample-size 12
+```
+
 Refresh it:
 
 ```bash
